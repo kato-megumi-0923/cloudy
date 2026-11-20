@@ -117,3 +117,29 @@ func TestFromText(t *testing.T) {
 		t.Error("plain lyrics have quiets")
 	}
 }
+
+// Enhanced LRC markers time the words without appearing in lyrics or translations.
+func TestEnhancedLRC(t *testing.T) {
+	lines := FromText("[03:08.359]<03:08.359>不管<03:11.029>有多少人<03:15.030>\n[03:16.000]<03:16.000>次\n[03:18.000]終")
+	if len(lines) != 3 || lines[0].Text != "不管有多少人" || !lines[0].Timed ||
+		len(lines[0].Words) != 2 || lines[0].Words[1].Start != 191029*time.Millisecond ||
+		lines[0].End != 195030*time.Millisecond || lines[1].Words[0].End != 198*time.Second ||
+		lines[2].Timed {
+		t.Fatalf("incorrect enhanced lyrics: %+v", lines)
+	}
+	translated := Build("[00:02]歌", "[00:02]<00:02>译文<00:03>", "")
+	if translated[0].Translation != "译文" {
+		t.Fatalf("incorrect translation: %+v", translated)
+	}
+}
+
+// A bilingual enhanced LRC keeps the original active at a shared timestamp.
+func TestBilingualEnhancedLRC(t *testing.T) {
+	lines := FromText("[01:16.149]<01:16.149>夕<01:16.349>陽<01:19.779>\n[01:16.149]<01:16.149>夕阳染红的街道<01:19.770>\n[01:21.269]次")
+	if len(lines) != 2 || Index(lines, 77*time.Second) != 0 ||
+		lines[0].Text != "夕陽" || lines[0].Translation != "夕阳染红的街道" ||
+		!lines[0].Timed || len(lines[0].Words) != 2 ||
+		lines[0].Words[1].Start != 76349*time.Millisecond {
+		t.Fatalf("incorrect bilingual lyrics: %+v", lines)
+	}
+}

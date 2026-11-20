@@ -31,6 +31,53 @@ type Word struct {
 }
 
 var lrcTime = regexp.MustCompile(`\[(\d+):(\d+)(?:[.:](\d+))?\]`)
+var enhancedLRCTime = regexp.MustCompile(`<(\d+):(\d+)(?:[.:](\d+))?>`)
+
+func lrcTimestamp(text string, match []int) time.Duration {
+	minutes, _ := strconv.Atoi(text[match[2]:match[3]])
+	seconds, _ := strconv.Atoi(text[match[4]:match[5]])
+	at := time.Duration(minutes)*time.Minute + time.Duration(seconds)*time.Second
+	if match[6] >= 0 {
+		// time.Duration has nanosecond precision.
+		fraction := text[match[6]:match[7]]
+		place := time.Second / 10
+		for _, digit := range fraction[:min(len(fraction), 9)] {
+			at += time.Duration(digit-'0') * place
+			place /= 10
+		}
+	}
+	return at
+}
+
+// Enhanced LRC uses angle brackets for absolute word times, including an
+// optional final marker that gives the end of the last word.
+func enhancedLRC(text string, at, shift time.Duration) Line {
+	line := Line{At: at, Text: text}
+	markers := enhancedLRCTime.FindAllStringSubmatchIndex(text, -1)
+	if len(markers) == 0 {
+		return line
+	}
+	var plain strings.Builder
+	start, offset := at, 0
+	for _, marker := range markers {
+		end := max(start, lrcTimestamp(text, marker)+shift)
+		part := text[offset:marker[0]]
+		if part != "" {
+			line.Words = append(line.Words, Word{Text: part, Start: start, End: end})
+			plain.WriteString(part)
+		}
+		start, offset = end, marker[1]
+	}
+	if part := text[offset:]; part != "" {
+		line.Words = append(line.Words, Word{Text: part, Start: start})
+		plain.WriteString(part)
+	} else {
+		line.End = start
+	}
+	line.Text = strings.TrimSpace(plain.String())
+	line.Timed = len(line.Words) > 0
+	return line
+}
 
 // parseLRC reads lyrics in the LRC format, as NetEase serves them: a line
 // may carry several times, and credits come as lines of their own.
@@ -42,20 +89,10 @@ func parseLRC(lrc string) []Line {
 			continue
 		}
 		text := strings.TrimSpace(raw[times[len(times)-1][1]:])
+		first := lrcTimestamp(raw, times[0])
 		for _, m := range times {
-			min, _ := strconv.Atoi(raw[m[2]:m[3]])
-			sec, _ := strconv.Atoi(raw[m[4]:m[5]])
-			var frac time.Duration
-			if m[6] >= 0 {
-				f := raw[m[6]:m[7]]
-				n, _ := strconv.Atoi(f)
-				frac = time.Duration(n) * time.Second
-				for range len(f) {
-					frac /= 10
-				}
-			}
-			at := time.Duration(min)*time.Minute + time.Duration(sec)*time.Second + frac
-			out = append(out, Line{At: at, Text: text})
+			at := lrcTimestamp(raw, m)
+			out = append(out, enhancedLRC(text, at, at-first))
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].At < out[j].At })
@@ -126,8 +163,17 @@ func Build(lrc, translation, yrc string) []Line {
 			if i+1 < len(lines) {
 				end = min(end, lines[i+1].At)
 			}
-			lines[i].End = end
-			lines[i].Words = SpreadWords(lines[i].Text, lines[i].At, end)
+			line := &lines[i]
+			if line.Timed {
+				last := &line.Words[len(line.Words)-1]
+				if last.End == 0 {
+					last.End = max(last.Start, end)
+				}
+				line.End = max(line.End, last.End)
+			} else {
+				line.End = end
+				line.Words = SpreadWords(line.Text, line.At, end)
+			}
 		}
 	}
 	// Translations go to the line nearest their time: word-timed lines
@@ -263,7 +309,22 @@ func FromText(text string) []Line {
 		return nil
 	}
 	if lrcTime.MatchString(text) {
-		return Build(text, "", "")
+		lines := Build(text, "", "")
+		merged := lines[:0]
+		for _, line := range lines {
+			if len(merged) > 0 {
+				original := &merged[len(merged)-1]
+				// Bilingual enhanced LRC places the translation after the
+				// original, with the same line time and one span for the translation.
+				if original.At == line.At && original.Timed && len(original.Words) > 1 &&
+					line.Timed && len(line.Words) == 1 && original.Translation == "" {
+					original.Translation = line.Text
+					continue
+				}
+			}
+			merged = append(merged, line)
+		}
+		return merged
 	}
 	var lines []Line
 	for _, raw := range strings.Split(strings.ReplaceAll(text, "\r", "\n"), "\n") {
