@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf16"
+
+	"netease-music-mygo/internal/wav"
 )
 
 // Song is a file of the listener's folder, as its tags describe it, or as
@@ -93,7 +95,7 @@ func Paths(dir string) ([]string, error) {
 			return nil
 		}
 		switch strings.ToLower(filepath.Ext(path)) {
-		case ".mp3", ".flac":
+		case ".mp3", ".flac", ".wav":
 			paths = append(paths, path)
 		}
 		return nil
@@ -107,7 +109,7 @@ func Paths(dir string) ([]string, error) {
 	return paths, nil
 }
 
-// Read returns the song at path, MP3 or FLAC, with the fallbacks its name
+// Read returns the song at path, MP3, FLAC or WAV, with the fallbacks its name
 // gives where its tags say nothing.
 func Read(path string) (*Song, error) {
 	f, err := os.Open(path)
@@ -125,8 +127,28 @@ func Read(path string) (*Song, error) {
 		readMP3(f, info.Size(), s)
 	case ".flac":
 		readFLAC(f, info.Size(), s)
+	case ".wav":
+		wave, err := wav.Open(f, info.Size())
+		if err != nil {
+			return nil, err
+		}
+		s.Duration = time.Duration(float64(wave.Frames()) / float64(wave.Rate) * float64(time.Second))
+		for _, chunk := range wave.Chunks {
+			if (chunk.ID != "id3 " && chunk.ID != "ID3 " && chunk.ID != "LIST") || chunk.Size > 16<<20 {
+				continue
+			}
+			data := make([]byte, chunk.Size)
+			if _, err := f.ReadAt(data, chunk.Offset); err != nil {
+				continue
+			}
+			if chunk.ID == "LIST" {
+				readWAVInfo(data, s)
+			} else if len(data) >= 10 && int64(syncsafe(data[6:10]))+10 <= int64(len(data)) {
+				readID3v2(data, s)
+			}
+		}
 	default:
-		return nil, fmt.Errorf("local: %s is not an MP3 or a FLAC", path)
+		return nil, fmt.Errorf("local: %s is not an MP3, FLAC or WAV", path)
 	}
 	infer(s)
 	return s, nil

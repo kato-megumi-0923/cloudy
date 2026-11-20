@@ -16,7 +16,7 @@ func (a *app) localPage(c *ui.Context) {
 	a.loadLibrary(false)
 	if len(a.settings.LocalFolders) == 0 {
 		a.localEmpty(c, "还没有添加本地音乐文件夹",
-			"添加存放音乐的文件夹后，Cloudy 会读取其中的 MP3 和 FLAC 文件（包括子文件夹），按歌手、专辑整理，文件夹有变化时自动更新。")
+			"添加存放音乐的文件夹后，Cloudy 会读取其中的 MP3、FLAC 和 WAV 文件（包括子文件夹），按歌手、专辑整理，文件夹有变化时自动更新。")
 		return
 	}
 	tracks := a.lib.tracks
@@ -25,7 +25,7 @@ func (a *app) localPage(c *ui.Context) {
 		return
 	}
 	if len(tracks) == 0 {
-		msg := "这些文件夹里没有找到 MP3 或 FLAC 文件。"
+		msg := "这些文件夹里没有找到 MP3、FLAC 或 WAV 文件。"
 		if a.lib.err != "" {
 			msg = a.lib.err
 		}

@@ -94,6 +94,31 @@ func TestFetchSavesFLAC(t *testing.T) {
 	}
 }
 
+// WAV streams retain their file type and audio bytes when downloaded.
+func TestFetchSavesWAV(t *testing.T) {
+	payload, err := os.ReadFile(filepath.Join("..", "player", "testdata", "seek.wav"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(payload) }))
+	defer srv.Close()
+	old := songURL
+	defer func() { songURL = old }()
+	for _, kind := range []string{"wav", ""} {
+		songURL = func(ctx context.Context, id int64, level string) (*netease.Stream, error) {
+			return &netease.Stream{URL: srv.URL + "/song.wav", Type: kind, Level: "lossless", Size: int64(len(payload))}, nil
+		}
+		item, err := Fetch(context.Background(), testTrack(), "lossless", t.TempDir(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(item.Path)
+		if err != nil || filepath.Ext(item.Path) != ".wav" || !bytes.Equal(got, payload) {
+			t.Fatalf("incorrect WAV download: %s %v", item.Path, err)
+		}
+	}
+}
+
 // A second song of the same name does not write over the first.
 func TestFetchKeepsBothOfTheSameName(t *testing.T) {
 	old := songURL

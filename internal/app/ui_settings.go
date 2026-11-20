@@ -892,13 +892,13 @@ func (a *app) settingsStoragePage(k *settingsKit) {
 				}
 			})
 		}
-		k.row("添加文件夹", "读取文件夹和子文件夹里的 MP3、FLAC，显示在「本地音乐」，文件夹有变化时自动更新", func() {
+		k.row("添加文件夹", "读取文件夹和子文件夹里的 MP3、FLAC、WAV，显示在「本地音乐」，文件夹有变化时自动更新", func() {
 			if k.button("local-add", "添加…", iconPlus, false, false).Clicked() {
 				a.pickLibraryFolder()
 			}
 		})
 		if canRegisterOpenWith {
-			k.row("用 Cloudy 打开音乐文件", "加入 MP3、FLAC 的「打开方式」；要设为默认播放器，请在系统的默认应用设置里选择 Cloudy", func() {
+			k.row("用 Cloudy 打开音乐文件", "加入 MP3、FLAC、WAV 的「打开方式」；要设为默认播放器，请在系统的默认应用设置里选择 Cloudy", func() {
 				if k.button("open-with", "添加到打开方式", nil, false, false).Clicked() {
 					if err := registerOpenWith(); err != nil {
 						a.toast = "添加失败：" + err.Error()

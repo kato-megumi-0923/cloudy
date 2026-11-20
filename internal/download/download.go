@@ -119,7 +119,7 @@ func Fetch(ctx context.Context, tr netease.Track, level, dir string, progress Pr
 	if ext == "" {
 		ext = extensionOf(st.URL)
 	}
-	if ext != "mp3" && ext != "flac" {
+	if ext != "mp3" && ext != "flac" && ext != "wav" {
 		return Item{}, fmt.Errorf("不支持的下载格式：%s", ext)
 	}
 	u, err := url.Parse(st.URL)
@@ -271,7 +271,7 @@ func extensionOf(raw string) string {
 		return "mp3"
 	}
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(u.Path)), ".")
-	if ext != "mp3" && ext != "flac" {
+	if ext != "mp3" && ext != "flac" && ext != "wav" {
 		return "mp3"
 	}
 	return ext
@@ -293,9 +293,11 @@ func uniquePath(dir, name, ext string) (string, error) {
 }
 
 // audioHead reports whether the first bytes are those of the format asked
-// for: an MP3 frame or its ID3 tag, or FLAC's mark.
+// for: an MP3 frame or its ID3 tag, FLAC's mark, or RIFF/WAVE.
 func audioHead(head []byte, ext string) bool {
 	switch ext {
+	case "wav":
+		return len(head) >= 12 && string(head[:4]) == "RIFF" && string(head[8:12]) == "WAVE"
 	case "flac":
 		return bytes.HasPrefix(head, []byte("fLaC"))
 	case "mp3":

@@ -10,7 +10,7 @@ import (
 
 // songTypes are the files Cloudy opens, as mygo.json's fileAssociations
 // list them.
-var songTypes = []struct{ ext, name string }{{"mp3", "MP3 音频"}, {"flac", "FLAC 音频"}}
+var songTypes = []struct{ ext, name string }{{"mp3", "MP3 音频"}, {"flac", "FLAC 音频"}, {"wav", "WAV 音频"}}
 
 // appProgID is the start of the names of Cloudy's file types: what its
 // installer registers, so that the two are one, of the identifier's letters,
@@ -28,7 +28,7 @@ func appProgID() string {
 const canRegisterOpenWith = true
 
 // registerOpenWith lists Cloudy, as it runs from where it is, among the apps
-// that open MP3 and FLAC files, for the listener: what the installer does,
+// that open MP3, FLAC and WAV files, for the listener: what the installer does,
 // for a copy unpacked by hand. Choosing it as the default stays the
 // listener's, in the system's settings.
 func registerOpenWith() error {

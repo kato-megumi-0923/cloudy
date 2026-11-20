@@ -12,7 +12,7 @@ import (
 // A song from the listener's folder opens from its file, MP3 or FLAC,
 // without being streamed or cached.
 func TestLocalFileOpens(t *testing.T) {
-	for _, name := range []string{"seek.mp3", "seek.flac"} {
+	for _, name := range []string{"seek.mp3", "seek.flac", "seek.wav"} {
 		b, err := os.ReadFile(filepath.Join("testdata", name))
 		if err != nil {
 			t.Fatal(err)

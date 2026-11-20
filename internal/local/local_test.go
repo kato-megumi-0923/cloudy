@@ -16,6 +16,11 @@ func TestScanReadsSongs(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "album", "01 - 晴天.mp3"), taggedMP3(t))
 	writeFile(t, filepath.Join(dir, "02 - 林俊杰 - 江南.mp3"), plainMP3())
 	writeFile(t, filepath.Join(dir, "live.flac"), taggedFLAC())
+	wave, err := os.ReadFile(filepath.Join("..", "player", "testdata", "seek.wav"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "Artist - Wave.WAV"), wave)
 	writeFile(t, filepath.Join(dir, "notes.txt"), []byte("not a song"))
 	writeFile(t, filepath.Join(dir, "cover.jpg"), []byte("not a song"))
 
@@ -23,12 +28,15 @@ func TestScanReadsSongs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(songs) != 3 {
-		t.Fatalf("found %d songs, want 3", len(songs))
+	if len(songs) != 4 {
+		t.Fatalf("found %d songs, want 4", len(songs))
 	}
 	byName := map[string]Song{}
 	for _, s := range songs {
 		byName[filepath.Base(s.Path)] = s
+	}
+	if s := byName["Artist - Wave.WAV"]; s.Title != "Wave" || s.Artist != "Artist" || s.Duration != time.Second {
+		t.Fatalf("incorrect WAV metadata: %+v", s)
 	}
 	mp3, ok := byName["01 - 晴天.mp3"]
 	if !ok {

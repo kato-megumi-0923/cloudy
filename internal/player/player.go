@@ -1028,7 +1028,7 @@ var lyricsOf = netease.Lyrics
 
 var errNoLyrics = errors.New("player: no lyrics")
 
-// openLocal opens the song in the file at path, an MP3 or a FLAC.
+// openLocal opens the song in the file at path, an MP3, FLAC or WAV.
 func openLocal(path string, d int64) (*netease.Stream, stream, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -1040,12 +1040,12 @@ func openLocal(path string, d int64) (*netease.Stream, stream, error) {
 		return nil, nil, fmt.Errorf("本地文件无法读取：%s", filepath.Base(path))
 	}
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
-	if ext != "mp3" && ext != "flac" {
+	if ext != "mp3" && ext != "flac" && ext != "wav" {
 		f.Close()
 		return nil, nil, fmt.Errorf("不支持的本地音乐格式：%s", ext)
 	}
 	st := &netease.Stream{Size: info.Size(), Type: ext, Level: "exhigh", Path: path}
-	if ext == "flac" {
+	if ext == "flac" || ext == "wav" {
 		st.Level = "lossless"
 	}
 	s, err := openStream(opened(f, info.Size()), d)

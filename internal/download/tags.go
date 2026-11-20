@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf16"
+
+	"netease-music-mygo/internal/wav"
 )
 
 // Tags are what a downloaded song's file says of it, so that it shows as
@@ -23,8 +25,8 @@ type Tags struct {
 	ID int64
 }
 
-// WriteTags writes tags into the MP3 or FLAC file at path, in place of
-// those it has: an ID3v2.3 tag, or FLAC's comments and picture. The file
+// WriteTags writes tags into the MP3, FLAC or WAV file at path, in place of
+// those it has: ID3v2.3, FLAC comments and picture, or a RIFF ID3 chunk. The file
 // is written beside it and moved over it, so a failure leaves it whole.
 //
 // Only the tags are read into memory: the audio, some 50 MB of a lossless
@@ -40,6 +42,9 @@ func WriteTags(path string, t Tags) error {
 		return err
 	}
 	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".wav" {
+		return writeWAVTags(f, info.Size(), path, t)
+	}
 	if ext != ".mp3" && ext != ".flac" {
 		return errors.New("download: not an MP3 or a FLAC")
 	}
@@ -75,6 +80,73 @@ func WriteTags(path string, t Tags) error {
 		os.Remove(tmp)
 	}
 	return err
+}
+
+// writeWAVTags preserves the PCM data and unrelated RIFF chunks, replacing
+// embedded tags with an ID3 chunk understood by the local library.
+func writeWAVTags(f *os.File, size int64, path string, tags Tags) error {
+	info, err := wav.Open(f, size)
+	if err != nil {
+		return err
+	}
+	id3 := tagMP3(nil, tags)
+	newSize := int64(12 + 8 + len(id3) + len(id3)%2)
+	var chunks []wav.Chunk
+	for _, chunk := range info.Chunks {
+		if chunk.ID == "id3 " || chunk.ID == "ID3 " {
+			continue
+		}
+		if chunk.ID == "LIST" && chunk.Size >= 4 {
+			var kind [4]byte
+			if _, err := f.ReadAt(kind[:], chunk.Offset); err != nil {
+				return err
+			}
+			if string(kind[:]) == "INFO" {
+				continue
+			}
+		}
+		chunks = append(chunks, chunk)
+		newSize += 8 + chunk.Size + chunk.Size%2
+	}
+	if newSize-8 > 0xffffffff {
+		return errors.New("wav: tags exceed RIFF size limit")
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".cloudy-wav-*.tagging")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+	header := []byte("RIFF\x00\x00\x00\x00WAVE")
+	binary.LittleEndian.PutUint32(header[4:], uint32(newSize-8))
+	if _, err := tmp.Write(header); err != nil {
+		return err
+	}
+	for _, chunk := range chunks {
+		if _, err := io.Copy(tmp, io.NewSectionReader(f, chunk.Offset-8, 8+chunk.Size+chunk.Size%2)); err != nil {
+			return err
+		}
+	}
+	h := []byte("id3 \x00\x00\x00\x00")
+	binary.LittleEndian.PutUint32(h[4:], uint32(len(id3)))
+	if _, err := tmp.Write(h); err != nil {
+		return err
+	}
+	if _, err := tmp.Write(id3); err != nil {
+		return err
+	}
+	if len(id3)%2 != 0 {
+		if _, err := tmp.Write([]byte{0}); err != nil {
+			return err
+		}
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // headOf reads what of a file comes before its audio: its ID3 tag, and a

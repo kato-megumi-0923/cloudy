@@ -34,7 +34,7 @@ func TestFixCancelSharedOpen(t *testing.T) {
 
 // Seeking or reading unbuffered MP3 and FLAC audio can be cancelled for captions alone.
 func TestFixCancelSharedAudio(t *testing.T) {
-	for _, ext := range []string{"mp3", "flac"} {
+	for _, ext := range []string{"mp3", "flac", "wav"} {
 		b, err := os.ReadFile("testdata/seek." + ext)
 		if err != nil {
 			t.Fatal(err)
@@ -53,6 +53,15 @@ func TestFixCancelSharedAudio(t *testing.T) {
 					done := make(chan error, 1)
 					go func() {
 						if operation == "seek" {
+							if ext == "wav" {
+								if err := src.SetPosition(src.Len() * 3 / 4); err != nil {
+									done <- err
+									return
+								}
+								_, err := src.Read(make([]float32, 4096))
+								done <- err
+								return
+							}
 							done <- src.SetPosition(int64(src.SampleRate()) * 4)
 							return
 						}

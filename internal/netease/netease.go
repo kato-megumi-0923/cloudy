@@ -512,7 +512,7 @@ type Stream struct {
 	// listener's own, or "" for a stream of NetEase's.
 	Path string `json:"-"`
 	Size int64  `json:"size"` // in bytes
-	// Type is the format: mp3, or flac for the lossless levels.
+	// Type is the format returned by the server: mp3, flac or wav.
 	Type string `json:"type"`
 	// Level is the level served, which may be below the one asked for.
 	Level string `json:"level"`
@@ -648,7 +648,7 @@ func streamFromSongURLData(code int, d songURLData, level string) (*Stream, erro
 			s.Type = "flac"
 		}
 	}
-	if s.Type != "" && s.Type != "mp3" && s.Type != "flac" {
+	if s.Type != "" && s.Type != "mp3" && s.Type != "flac" && s.Type != "wav" {
 		return nil, fmt.Errorf("unsupported format %s", s.Type)
 	}
 	if d.Peak != nil {

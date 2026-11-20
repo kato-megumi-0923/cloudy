@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	"netease-music-mygo/internal/local"
+	"netease-music-mygo/internal/wav"
 )
 
 // A downloaded song's file carries its title, artist, album and cover, and
 // still starts as the audio it was, MP3 or FLAC.
 func TestWriteTags(t *testing.T) {
 	cover := append([]byte{0xff, 0xd8, 0xff, 0xe0}, bytes.Repeat([]byte{7}, 300)...)
-	for _, name := range []string{"seek.mp3", "seek.flac"} {
+	for _, name := range []string{"seek.mp3", "seek.flac", "seek.wav"} {
 		src, err := os.ReadFile(filepath.Join("..", "player", "testdata", name))
 		if err != nil {
 			t.Fatal(err)
@@ -39,6 +40,20 @@ func TestWriteTags(t *testing.T) {
 			t.Errorf("%s: cover of %d bytes, want %d", name, len(s.Picture), len(cover))
 		}
 		got, _ := os.ReadFile(path)
+		if filepath.Ext(name) == ".wav" {
+			before, err := wav.Open(bytes.NewReader(src), int64(len(src)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			after, err := wav.Open(bytes.NewReader(got), int64(len(got)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if before.Size != after.Size || !bytes.Equal(src[before.Data:before.Data+before.Size], got[after.Data:after.Data+after.Size]) {
+				t.Fatal("WAV audio changed while writing tags")
+			}
+			continue
+		}
 		if !bytes.HasSuffix(got, src[id3Len(src)+audioStart(t, src[id3Len(src):], name):]) {
 			t.Errorf("%s: the audio changed", name)
 		}

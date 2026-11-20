@@ -18,7 +18,7 @@ import (
 const mostDropped = 2000
 
 // listenForDrops plays the songs dropped on the window: files, and the songs
-// in folders, MP3 and FLAC.
+// in folders, MP3, FLAC and WAV.
 func (a *app) listenForDrops() {
 	a.win.OnFileDrop(func(e *mygo.FileDropEvent) {
 		paths := slices.Clone(e.Paths)
@@ -57,7 +57,7 @@ func droppedTracks(paths []string, artDir string) (tracks []netease.Track, other
 		}
 		if !info.IsDir() {
 			switch strings.ToLower(filepath.Ext(path)) {
-			case ".mp3", ".flac":
+			case ".mp3", ".flac", ".wav":
 				add(path)
 			default:
 				other++
@@ -81,7 +81,7 @@ func droppedTracks(paths []string, artDir string) (tracks []netease.Track, other
 // dropped alone was all there was to skip to, and played again.
 func (a *app) playDropped(tracks []netease.Track, other int) {
 	if len(tracks) == 0 {
-		a.toast = "只能播放 MP3 和 FLAC 文件"
+		a.toast = "只能播放 MP3、FLAC 和 WAV 文件"
 		a.redraw()
 		return
 	}
@@ -97,7 +97,7 @@ func (a *app) playDropped(tracks []netease.Track, other int) {
 		msg = "正在播放：" + tracks[0].Name
 	}
 	if other > 0 {
-		msg += fmt.Sprintf("（%d 个文件不是 MP3 或 FLAC，已跳过）", other)
+		msg += fmt.Sprintf("（%d 个文件不是 MP3、FLAC 或 WAV，已跳过）", other)
 	}
 	a.toast = msg
 	a.redraw()

@@ -15,7 +15,7 @@ import (
 )
 
 // Cache keeps the songs played on disk, so that they play again at once,
-// and without the network: each as <id>-<level>.mp3 or .flac, with what
+// and without the network: each as <id>-<level>.mp3, .flac or .wav, with what
 // its stream was beside it in <id>-<level>.json. Once they take more than
 // the limit, those played longest ago go first.
 type Cache struct {
@@ -87,7 +87,7 @@ func cacheKey(id int64, level string) string { return fmt.Sprintf("%d-%s", id, l
 // keepable reports whether a song of level and type ext may be kept: they
 // name its file, so only those known, which keep it in the cache's folder.
 func keepable(level, ext string) bool {
-	return slices.Contains(netease.Levels, level) && (ext == "mp3" || ext == "flac")
+	return slices.Contains(netease.Levels, level) && (ext == "mp3" || ext == "flac" || ext == "wav")
 }
 
 // lookup returns a song kept at level or a better one, open to read, with
@@ -241,7 +241,7 @@ func songsIn(dir string) []cachedSong {
 	var out []cachedSong
 	for _, e := range entries {
 		ext := filepath.Ext(e.Name())
-		if ext != ".mp3" && ext != ".flac" {
+		if ext != ".mp3" && ext != ".flac" && ext != ".wav" {
 			continue
 		}
 		info, err := e.Info()
