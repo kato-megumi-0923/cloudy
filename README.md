@@ -2,7 +2,7 @@
 
 <img src="resources/icon.png" width="120" alt="Cloudy 图标">
 
-nya 维护的 Windows 音乐客户端（原名 Cloud-nya），登录网易云音乐账号后使用其曲库。用 Go 和 [MyGo](https://github.com/egoist/mygo) 编写，原生界面，不用 WebView，占用小、启动快。
+nya 维护的 Windows 音乐客户端（原名 Cloud-nya），登录网易云音乐账号后使用其曲库。用 Go 编写，原生界面，不用 WebView，占用小、启动快。
 
 ## 特色功能
 
@@ -83,7 +83,6 @@ Cloudy 由 **nya-owo** 开发并维护，同时借助 AI 工具协助完成开�
 
 ## 致谢
 
-- [egoist/mygo-cloudmusic](https://github.com/egoist/mygo-cloudmusic)：本项目修改自它，原作者 egoist
 - [Lucide](https://lucide.dev)：部分图标（ISC 许可）
 - [MyGo](https://github.com/egoist/mygo)：原生 UI 与应用框架
 - [NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi)：eapi 加密与登录流程的参考
