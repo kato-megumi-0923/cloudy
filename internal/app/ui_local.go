@@ -130,10 +130,36 @@ func (a *app) localHeader(c *ui.Context) {
 	})
 }
 
+// foldersButtonText names the folders the button opens: the first one, cut
+// short when its name is long, and how many others there are.
+func (a *app) foldersButtonText() string {
+	dirs := a.settings.LocalFolders
+	if len(dirs) == 0 {
+		return "文件夹"
+	}
+	text := shortFolderName(filepath.Base(dirs[0]))
+	if others := len(dirs) - 1; others > 0 {
+		text += fmt.Sprintf(" +%d", others)
+	}
+	return text
+}
+
+// folderNameKept is how many characters of a folder's name the button shows.
+const folderNameKept = 5
+
+// shortFolderName is name as the button can show it.
+func shortFolderName(name string) string {
+	r := []rune(name)
+	if len(r) <= folderNameKept {
+		return name
+	}
+	return string(r[:folderNameKept]) + "…"
+}
+
 // localFoldersButton lists the library's folders, each to open or take out.
 func (a *app) localFoldersButton(c *ui.Context) {
 	p := a.pal
-	b := pillButton(c.Key("folders"), iconFolder, fmt.Sprintf("文件夹 %d", len(a.settings.LocalFolders)), p.hover.Over(p.bg), p.text)
+	b := pillButton(c.Key("folders"), iconFolder, a.foldersButtonText(), p.hover.Over(p.bg), p.text)
 	if !b.Clicked() {
 		return
 	}
