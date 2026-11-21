@@ -885,7 +885,10 @@ func (a *app) timedLines(c *ui.Context, scroll ui.Element, lines []lyrics.Line, 
 					// Where it is in the pane, as it shows, held back by lag.
 					mid := b.Y + b.H/2 - lag - view.Y
 					edge := min(easeRange(mid, 0, npLyricEdge), easeRange(view.H-mid, 0, npLyricEdge))
-					if edge < 1 {
+					// The line being sung is never faded: as a song starts it
+					// sits at the top of the pane, and faded it reads darker
+					// than the lines still to come.
+					if edge < 1 && !on {
 						line.Opacity(edge)
 					}
 				}
