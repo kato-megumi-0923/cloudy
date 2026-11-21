@@ -44,21 +44,50 @@ var kugouBase = "http://lyrics.kugou.com"
 // errNone says a source has no lyrics for the song.
 var errNone = errors.New("wordlyrics: none")
 
-// Find returns word-timed lyrics of s, and where they are from ("AMLL",
+// Find returns word-timed lyrics of s, and where they are from ("QQ", "AMLL",
 // "酷狗"), or none. Lyrics whose words are all spread evenly are not
 // returned: they are no better than NetEase's lines.
 func Find(ctx context.Context, s Song) ([]lyrics.Line, string) {
+	lines, from, _ := FindStrict(ctx, s)
+	return lines, from
+}
+
+// FindStrict is Find, saying whether a source could not be asked at all:
+// a timeout is no answer about the song, where none having the lyrics is.
+//
+// The sources are asked in the order a listener's library needs them: QQ
+// has word timing for most of what is played in China, AMLL has the ones
+// its watchers timed by hand, and Kugou fills in where the two have none.
+func FindStrict(ctx context.Context, s Song) (lines []lyrics.Line, from string, err error) {
+	var failed error
+	if s.Name != "" && s.Length > 0 {
+		got, e := qq(ctx, s)
+		if e == nil && len(got) > 0 {
+			return got, "QQ", nil
+		}
+		if e != nil {
+			failed = e
+		}
+	}
 	if s.ID > 0 {
-		if lines, err := amll(ctx, s.ID); err == nil && len(lines) > 0 {
-			return lines, "AMLL"
+		got, e := amll(ctx, s.ID)
+		if e == nil && len(got) > 0 {
+			return got, "AMLL", nil
+		}
+		if e != nil {
+			failed = e
 		}
 	}
 	if s.Name != "" && s.Length > 0 {
-		if lines, err := kugou(ctx, s); err == nil && len(lines) > 0 && lyrics.Uneven(lines) {
-			return lines, "酷狗"
+		got, e := kugou(ctx, s)
+		if e == nil && len(got) > 0 && lyrics.Uneven(got) {
+			return got, "酷狗", nil
+		}
+		if e != nil {
+			failed = e
 		}
 	}
-	return nil, ""
+	return nil, "", failed
 }
 
 func get(ctx context.Context, u string) ([]byte, int, error) {
@@ -77,13 +106,20 @@ func get(ctx context.Context, u string) ([]byte, int, error) {
 }
 
 // amll reads song id's lyrics from the AMLL TTML database. A 404 from one
-// base is the answer: the others mirror it.
+// base is the answer: the others mirror it. Bases that could not be asked
+// at all are an error when they are all that happened.
 func amll(ctx context.Context, id int64) ([]lyrics.Line, error) {
+	var unreachable error
 	for _, base := range amllBases {
 		b, code, err := get(ctx, fmt.Sprintf("%s%d.ttml", base, id))
 		if err != nil || code >= 500 || code == 403 || code == 429 {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
+			}
+			if err != nil {
+				unreachable = err
+			} else {
+				unreachable = fmt.Errorf("wordlyrics: amll answered %d", code)
 			}
 			continue
 		}
@@ -91,6 +127,9 @@ func amll(ctx context.Context, id int64) ([]lyrics.Line, error) {
 			return nil, errNone
 		}
 		return lyrics.ParseTTML(b), nil
+	}
+	if unreachable != nil {
+		return nil, unreachable
 	}
 	return nil, errNone
 }
@@ -116,8 +155,13 @@ func kugou(ctx context.Context, s Song) ([]lyrics.Line, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A 404 is Kugou having none; anything else is Kugou or the network
+	// refusing to answer, which is not the same thing.
 	if code != http.StatusOK {
-		return nil, errNone
+		if code == http.StatusNotFound {
+			return nil, errNone
+		}
+		return nil, fmt.Errorf("wordlyrics: kugou answered %d", code)
 	}
 	var res struct {
 		Candidates []kugouCandidate `json:"candidates"`
@@ -135,7 +179,10 @@ func kugou(ctx context.Context, s Song) ([]lyrics.Line, error) {
 		return nil, err
 	}
 	if code != http.StatusOK {
-		return nil, errNone
+		if code == http.StatusNotFound {
+			return nil, errNone
+		}
+		return nil, fmt.Errorf("wordlyrics: kugou answered %d", code)
 	}
 	var dl struct {
 		Content string `json:"content"`
@@ -154,7 +201,7 @@ func kugou(ctx context.Context, s Song) ([]lyrics.Line, error) {
 // and the note on who translated them that stands as the first
 // translation.
 func trimKugou(lines []lyrics.Line, s Song) []lyrics.Line {
-	if len(lines) > 0 && strings.Contains(lines[0].Text, " - ") && strings.Contains(fold(lines[0].Text), fold(s.Name)) {
+	if len(lines) > 0 && strings.Contains(lines[0].Text, " - ") && strings.Contains(Fold(lines[0].Text), Fold(s.Name)) {
 		lines = lines[1:]
 	}
 	for i := range lines {
@@ -168,17 +215,17 @@ func trimKugou(lines []lyrics.Line, s Song) []lyrics.Line {
 // pick is the first of cs that is s: Kugou lists the likeliest first, but
 // also songs of other names and lengths.
 func pick(cs []kugouCandidate, s Song) *kugouCandidate {
-	name := fold(s.Name)
+	name := Fold(s.Name)
 	for i := range cs {
 		c := &cs[i]
 		gap := time.Duration(c.Duration)*time.Millisecond - s.Length
 		if gap < -3*time.Second || gap > 3*time.Second || c.AccessKey == "" {
 			continue
 		}
-		if fold(c.Song) != name {
+		if Fold(c.Song) != name {
 			continue
 		}
-		if len(s.Artists) > 0 && c.Singer != "" && !sharesArtist(c.Singer, s.Artists) {
+		if len(s.Artists) > 0 && c.Singer != "" && !SharesArtist(c.Singer, s.Artists) {
 			continue
 		}
 		return c
@@ -186,20 +233,22 @@ func pick(cs []kugouCandidate, s Song) *kugouCandidate {
 	return nil
 }
 
-func sharesArtist(singer string, artists []string) bool {
-	got := fold(singer)
+// SharesArtist reports whether singer, as a source names who sings, is one
+// of artists: sources join them differently, and add ones of their own.
+func SharesArtist(singer string, artists []string) bool {
+	got := Fold(singer)
 	for _, a := range artists {
-		if f := fold(a); f != "" && strings.Contains(got, f) {
+		if f := Fold(a); f != "" && strings.Contains(got, f) {
 			return true
 		}
 	}
 	return false
 }
 
-// fold is a name as compared: lower case, without spaces, punctuation or
+// Fold is a name as compared: lower case, without spaces, punctuation or
 // what follows its first bracket ("(feat. …)", "(Live)"): a live take or
 // an accompaniment is told apart by its length instead.
-func fold(s string) string {
+func Fold(s string) string {
 	s = strings.ToLower(s)
 	if i := strings.IndexAny(s, "(（[【"); i > 0 {
 		s = s[:i]
