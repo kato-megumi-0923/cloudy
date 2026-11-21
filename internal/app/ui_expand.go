@@ -223,7 +223,7 @@ func (a *app) lifted(e ui.Element) {
 // them.
 func pageLevel(r route) int {
 	switch r.page {
-	case pagePlaylist, pageArtist, pageAlbum, pageUser, pagePodcast, pageStyle:
+	case pagePlaylist, pageArtist, pageAlbum, pageUser, pagePodcast, pageStyle, pageHistoryDaily:
 		return 1
 	}
 	return 0
@@ -264,6 +264,19 @@ func (a *app) paneMotion(panel ui.Element) {
 	panel.Transition(ui.ElementTransition{Animation: &motionPane, Enter: &ui.Motion{Scale: scale}, Exit: &ui.Motion{Scale: 0.97}})
 }
 
+// scalingBody holds what is in a dialog's panel. While the panel grows in,
+// it is painted once into a layer that the panel's scale only moves: the
+// clips of the scrolling, rounded and inset parts under a scale were drawn
+// on the CPU at every frame, and opening the settings stuttered (#20). The
+// panel keeps its glass, which sees through as it goes.
+func (a *app) scalingBody(c *ui.Context, fn func()) {
+	body := ui.Column(c.Key("scaling-body")).Grow(1).MinHeight(0).AlignItems(ui.Stretch)
+	if a.dialogScaling {
+		body.Cache()
+	}
+	body.Children(fn)
+}
+
 // dialog is DialogBase coming and going. A panel is as new as the backdrop it
 // is on, and a Transition moves only what appears in a parent that was there,
 // so a dialog's Enter and Exit never show: it moves by hand. The backdrop fades
@@ -281,7 +294,9 @@ func (a *app) dialog(c *ui.Context, key string, dim float32, open *bool, fn func
 	shown := true
 	ui.DialogBase(c.Key(key), &shown, func(backdrop, panel ui.Element) {
 		backdrop.Background(ui.RGBA(0, 0, 0, dim*k))
+		a.dialogScaling = k < 1 && a.motion == motionFull
 		fn(panel)
+		a.dialogScaling = false
 		if k < 1 {
 			panel.Opacity(k)
 			if a.motion == motionFull {

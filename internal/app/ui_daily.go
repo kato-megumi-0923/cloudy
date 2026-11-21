@@ -569,6 +569,9 @@ func (a *app) dailyPage(c *ui.Context) {
 					if pillButton(c.Key("shuffle"), iconShuffle, "随机播放", p.hover.Over(p.bg), p.text).Clicked() {
 						a.playList(songs, true)
 					}
+					if pillButton(c.Key("history"), iconHistory, "历史日推", p.hover.Over(p.bg), p.text).Clicked() {
+						a.open(route{page: pageHistoryDaily})
+					}
 					a.batchEntry(c)
 				})
 			})

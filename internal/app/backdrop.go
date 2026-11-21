@@ -135,9 +135,10 @@ func (a *app) backdrop(c *ui.Context, art *artwork, tint ui.Color, opacity float
 	pl := a.pl
 	fog, still := a.settings.Fog, c.Preferences().ReduceMotion
 	style := a.settings.FogStyle
+	scene := backdropSceneOf(style)
 	cover := tint
 	if fog {
-		tint = a.settings.tintOf(backdropSceneOf(style).id, tint)
+		tint = a.settings.tintOf(scene.id, tint)
 	}
 	ui.Box(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).PassThrough().Draw(func(p *ui.Painter, r ui.Rect) {
 		// The CPU, drawing the fog for want of a GPU, paints far fewer
@@ -161,24 +162,32 @@ func (a *app) backdrop(c *ui.Context, art *artwork, tint ui.Color, opacity float
 			bd.canvas, bd.before, bd.fadeAt = bd.before, bd.canvas, now
 		}
 		moving := fog && gpu && !still
-		lv, live := pl.Levels()
-		moved := bd.step(now, pl.Playing() && moving, lv, live && moving)
-		aspect := r.W / max(r.H, 1)
-		if fog && backdropSceneOf(style).over != nil {
-			bd.leaves.step(float32(bd.moved), aspect, bd.drift, &bd.beat.drops)
+		var lv [player.Bands]float32
+		var live bool
+		if moving {
+			lv, live = pl.Levels()
 		}
-		leaves := bd.leaves.uniform(aspect)
+		moved := bd.step(now, pl.Playing() && moving, lv, live)
+		var drops, leaves []float32
+		if fog && scene.drops {
+			drops = bd.beat.uniform()
+		}
+		if fog && scene.over != nil {
+			aspect := r.W / max(r.H, 1)
+			bd.leaves.step(float32(bd.moved), aspect, bd.drift, &bd.beat.drops)
+			leaves = bd.leaves.uniform(aspect)
+		}
+		bass := bd.level.group(0, 6)
 		due := now.Sub(bd.at) >= backdropFrame-2*time.Millisecond
 		if bd.canvas == nil || bd.art != art || bd.tint != tint || bd.fog != fog || bd.style != style || moved && due {
 			if bd.canvas == nil {
 				bd.canvas = ui.NewCanvas(cw, ch)
 			}
 			bd.art, bd.tint, bd.fog, bd.style, bd.at = art, tint, fog, style, now
-			bass := bd.level.group(0, 6)
 			bd.canvas.Draw(p, func(cp *ui.Painter) {
 				box := ui.Rect{W: float32(cw), H: float32(ch)}
 				if fog {
-					drawSceneDrops(cp, box, style, tint, float32(bd.drift), bass, bd.beat.uniform(), leaves)
+					drawSceneDrops(cp, box, style, tint, float32(bd.drift), bass, drops, leaves)
 				} else {
 					drawBackdrop(cp, box, art, tint)
 				}
@@ -195,9 +204,9 @@ func (a *app) backdrop(c *ui.Context, art *artwork, tint ui.Color, opacity float
 				bd.before = nil
 			}
 		}
-		if fog && gpu {
-			// The stars, too fine for the canvas.
-			drawSceneOver(p, r, style, tint, float32(bd.drift), bd.level.group(0, 6), opacity, bd.beat.uniform(), leaves)
+		if fog && gpu && (scene.over != nil || scene.stars > 0) {
+			// Details too fine for the background canvas.
+			drawSceneOver(p, r, style, tint, float32(bd.drift), bass, opacity, drops, leaves)
 		}
 		if moved {
 			p.After(backdropFrame)

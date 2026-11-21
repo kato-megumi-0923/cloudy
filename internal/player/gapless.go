@@ -85,7 +85,8 @@ func (p *Player) startPreload(at int) {
 }
 
 // takePreload returns the preload of the track at order[at], as level,
-// played from its start, and drops any other.
+// played from its start, and drops any other (or one whose background
+// download already failed).
 func (p *Player) takePreload(at int, level string, from time.Duration, retries int) *preload {
 	n := p.pre
 	p.pre = nil
@@ -94,6 +95,12 @@ func (p *Player) takePreload(at int, level string, from time.Duration, retries i
 	}
 	if n.at == at && at >= 0 && at < len(p.order) && p.queue[p.order[at]].ID == n.id &&
 		n.level == level && from == 0 && retries == 0 {
+		if n.ready() && n.err == nil && n.s != nil {
+			if dl, _ := n.s.source(); dl != nil && dl.errSnapshot() != nil {
+				n.discard()
+				return nil
+			}
+		}
 		return n
 	}
 	n.discard()

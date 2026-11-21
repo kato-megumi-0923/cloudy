@@ -163,6 +163,7 @@ type settings struct {
 	// StageSparks throws sparks off each word on the stage as it is sung,
 	// whatever its style.
 	StageSparks bool `json:"stageSparks,omitempty"`
+	StageHiRes  bool `json:"stageHiRes,omitempty"`
 	// Volume is where the volume was left, from 0 to 1.
 	Volume float64 `json:"volume"`
 	// Normalize evens out the loudness of tracks, by what NetEase

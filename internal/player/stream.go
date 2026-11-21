@@ -1,8 +1,11 @@
 package player
 
 import (
+	"bufio"
 	"cmp"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -11,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,8 +53,11 @@ type download struct {
 	// users counts what reads or writes the song: the stream decoding it,
 	// until it closes, and the goroutine fetching it. The last to go
 	// closes the file, and removes it unless the cache kept it.
-	users  int
-	closed bool
+	// writing counts active file.WriteAt calls outside mu so hand/toMemory
+	// never close or rename the file mid-write.
+	users   int
+	writing int
+	closed  bool
 	// base is what stops every connection of the download, and url
 	// where the song is: a reader that wants bytes far past what is in
 	// has a connection of its own fetch them from there (jump), into
@@ -148,6 +155,25 @@ const (
 	putWhole
 )
 
+// maxHeadResumes is how many consecutive Range resumes a head fetcher attempts
+// after mid-stream socket drops before failing the download; maxTotalResumes
+// bounds total resumes across a single song so a flapping server cannot loop.
+const (
+	maxHeadResumes  = 3
+	maxTotalResumes = 6
+)
+
+// isTLSError reports whether err is a TLS handshake or certificate failure
+// where retrying an HTTP-only CDN node over plain HTTP can recover playback.
+func isTLSError(err error) bool {
+	var hostErr x509.HostnameError
+	var unknownAuth x509.UnknownAuthorityError
+	var certInvalid x509.CertificateInvalidError
+	var recErr tls.RecordHeaderError
+	return errors.As(err, &hostErr) || errors.As(err, &unknownAuth) ||
+		errors.As(err, &certInvalid) || errors.As(err, &recErr)
+}
+
 // fetch fetches the song from byte from on, for f.
 func (d *download) fetch(ctx context.Context, f *fetcher, from int64) {
 	defer d.release()
@@ -172,81 +198,164 @@ func (d *download) fetch(ctx context.Context, f *fetcher, from int64) {
 	// whole ends the download with all of the song in: the cache's, if
 	// it is as long as promised.
 	whole := func() {
-		if d.keep != nil && d.part != "" && (d.size <= 0 || d.n == d.size) {
+		d.mu.Lock()
+		keepable := d.keep != nil && d.part != "" && (d.size <= 0 || d.n == d.size)
+		d.mu.Unlock()
+		if keepable {
 			d.hand()
 		}
 		finish(nil)
 	}
-	req, err := http.NewRequestWithContext(ctx, "GET", d.url, nil)
-	if err != nil {
-		finish(err)
-		return
+	canResumeHead := func(at int64, resumes, total int) bool {
+		d.mu.Lock()
+		ok := f.head && at > 0 && !d.noJump && ctx.Err() == nil && resumes < maxHeadResumes && total < maxTotalResumes
+		d.mu.Unlock()
+		return ok
 	}
-	req.Header.Set("User-Agent", netease.UserAgent)
-	want := http.StatusOK
-	if from > 0 {
-		req.Header.Set("Range", "bytes="+strconv.FormatInt(from, 10)+"-")
-		want = http.StatusPartialContent
-	}
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		finish(cmp.Or(context.Cause(ctx), err))
-		return
-	}
-	defer res.Body.Close()
-	if res.StatusCode != want {
-		if from > 0 && res.StatusCode == http.StatusOK {
-			// The server sends the song only whole: no part of it is
-			// asked for again.
-			d.mu.Lock()
-			d.noJump = true
-			d.mu.Unlock()
+	resumeWait := func(attempt int) bool {
+		if attempt == 0 {
+			return true
 		}
-		finish(&streamHTTPError{code: res.StatusCode, status: res.Status})
-		return
+		timer := time.NewTimer(time.Duration(attempt) * 150 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			return true
+		case <-ctx.Done():
+			return false
+		}
 	}
+
 	buf := make([]byte, 64<<10)
 	at := from
+	resumes, totalResumes := 0, 0
+	httpFallback := false
 	for {
-		n, err := res.Body.Read(buf)
-		if n > 0 {
-			idle.Reset(20 * time.Second)
-			state, werr := d.put(f, buf[:n], at)
-			at += int64(n)
-			switch {
-			case werr != nil:
-				finish(werr)
-				return
-			case state == putStop:
-				return
-			case state == putWhole:
+		d.mu.Lock()
+		reqURL := d.url
+		d.mu.Unlock()
+		req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+		if err != nil {
+			finish(err)
+			return
+		}
+		req.Header.Set("User-Agent", netease.UserAgent)
+		want := http.StatusOK
+		if at > 0 {
+			req.Header.Set("Range", "bytes="+strconv.FormatInt(at, 10)+"-")
+			want = http.StatusPartialContent
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			if !httpFallback && at == 0 && strings.HasPrefix(reqURL, "https://") && ctx.Err() == nil && isTLSError(err) {
+				httpFallback = true
+				d.mu.Lock()
+				d.url = strings.Replace(d.url, "https://", "http://", 1)
+				d.mu.Unlock()
+				idle.Reset(20 * time.Second)
+				continue
+			}
+			if canResumeHead(at, resumes, totalResumes) && resumeWait(resumes) {
+				resumes++
+				totalResumes++
+				idle.Reset(20 * time.Second)
+				continue
+			}
+			finish(cmp.Or(context.Cause(ctx), err))
+			return
+		}
+		if res.StatusCode != want {
+			res.Body.Close()
+			if at > 0 && res.StatusCode == http.StatusOK {
+				// The server sends the song only whole: no part of it is
+				// asked for again.
+				d.mu.Lock()
+				d.noJump = true
+				d.mu.Unlock()
+			}
+			finish(&streamHTTPError{code: res.StatusCode, status: res.Status})
+			return
+		}
+		if at == 0 && res.ContentLength > 0 {
+			// Trust the actual HTTP response length over API metadata, which
+			// can differ slightly and otherwise cause false unexpected-EOF
+			// loops or cache truncated files when API size is 0.
+			d.mu.Lock()
+			d.size = res.ContentLength
+			d.mu.Unlock()
+		}
+		respStart, respLen := at, res.ContentLength
+		retryHead := false
+		for {
+			n, err := res.Body.Read(buf)
+			if n > 0 {
+				idle.Reset(20 * time.Second)
+				resumes = 0
+				state, werr := d.put(f, buf[:n], at)
+				at += int64(n)
+				switch {
+				case werr != nil:
+					res.Body.Close()
+					finish(werr)
+					return
+				case state == putStop:
+					res.Body.Close()
+					return
+				case state == putWhole:
+					res.Body.Close()
+					whole()
+					return
+				}
+			}
+			if err == io.EOF {
+				res.Body.Close()
+				d.mu.Lock()
+				if !f.head {
+					truncated := (respLen > 0 && at-respStart < respLen) || (d.size > 0 && at < d.size)
+					if truncated {
+						d.mu.Unlock()
+						finish(io.ErrUnexpectedEOF)
+						return
+					}
+					// Ahead, at the song's end: the head, when it meets
+					// what this brought in, has it all.
+					if d.ahead == f {
+						f.ended = true
+					}
+					d.cond.Broadcast()
+					d.mu.Unlock()
+					return
+				}
+				short := (respLen > 0 && at-respStart < respLen) || (d.size > 0 && d.n < d.size)
+				d.mu.Unlock()
+				if short {
+					if canResumeHead(at, resumes, totalResumes) && resumeWait(resumes) {
+						resumes++
+						totalResumes++
+						idle.Reset(20 * time.Second)
+						retryHead = true
+						break
+					}
+					finish(io.ErrUnexpectedEOF)
+					return
+				}
 				whole()
 				return
 			}
-		}
-		if err == io.EOF {
-			d.mu.Lock()
-			if !f.head {
-				// Ahead, at the song's end: the head, when it meets
-				// what this brought in, has it all.
-				if d.ahead == f {
-					f.ended = true
+			if err != nil {
+				res.Body.Close()
+				if canResumeHead(at, resumes, totalResumes) && resumeWait(resumes) {
+					resumes++
+					totalResumes++
+					idle.Reset(20 * time.Second)
+					retryHead = true
+					break
 				}
-				d.cond.Broadcast()
-				d.mu.Unlock()
+				finish(cmp.Or(context.Cause(ctx), err))
 				return
 			}
-			short := d.size > 0 && d.n < d.size
-			d.mu.Unlock()
-			if short {
-				finish(io.ErrUnexpectedEOF)
-				return
-			}
-			whole()
-			return
 		}
-		if err != nil {
-			finish(cmp.Or(context.Cause(ctx), err))
+		if !retryHead {
 			return
 		}
 	}
@@ -259,11 +368,21 @@ func (d *download) fetch(ctx context.Context, f *fetcher, from int64) {
 func (d *download) put(f *fetcher, b []byte, at int64) (int, error) {
 	d.mu.Lock()
 	file, head := d.file, f.head
+	if file != nil {
+		d.writing++
+	}
 	d.mu.Unlock()
 	if file != nil {
-		if _, err := file.WriteAt(b, at); err != nil {
+		_, werr := file.WriteAt(b, at)
+		d.mu.Lock()
+		d.writing--
+		if d.writing == 0 {
+			d.cond.Broadcast()
+		}
+		d.mu.Unlock()
+		if werr != nil {
 			if !head {
-				return putStop, err
+				return putStop, werr
 			}
 			if err := d.toMemory(); err != nil {
 				return putStop, err
@@ -277,22 +396,32 @@ func (d *download) put(f *fetcher, b []byte, at int64) (int, error) {
 			// Another jump took its place.
 			return putStop, nil
 		}
-		d.a1 = at + int64(len(b))
+		d.a1 = max(d.a1, at+int64(len(b)))
 		d.cond.Broadcast()
 		return putOn, nil
 	}
+	end := at + int64(len(b))
 	if d.file == nil {
-		if d.n+int64(len(b)) > maxMemoryDownload {
+		if end > maxMemoryDownload {
 			return putStop, errDownloadMemory
 		}
-		if need := len(d.data) + len(b); need > cap(d.data) {
-			next := make([]byte, len(d.data), min(maxMemoryDownload, max(need, 2*cap(d.data))))
-			copy(next, d.data)
-			d.data = next
+		if end > d.n {
+			skip := d.n - at
+			if skip < 0 {
+				return putStop, io.ErrUnexpectedEOF
+			}
+			add := b[skip:]
+			if need := len(d.data) + len(add); need > cap(d.data) {
+				next := make([]byte, len(d.data), min(maxMemoryDownload, max(need, 2*cap(d.data))))
+				copy(next, d.data)
+				d.data = next
+			}
+			d.data = append(d.data, add...)
+			d.n = end
 		}
-		d.data = append(d.data, b...)
+	} else {
+		d.n = max(d.n, end)
 	}
-	d.n += int64(len(b))
 	state := putOn
 	if a := d.ahead; a != nil && d.n >= d.a0 {
 		d.n = max(d.n, d.a1)
@@ -365,11 +494,44 @@ func (d *download) waitAt(off, n int64) bool {
 	return view.errContext() == nil && d.avail(off) >= n
 }
 
+// waitWriters waits until no fetcher is mid-WriteAt on d.file. Its caller
+// holds d.mu.
+func (d *download) waitWriters() {
+	for d.writing > 0 {
+		d.cond.Wait()
+	}
+}
+
+// totalSize returns d.size under lock, or 0 if unknown.
+func (d *download) totalSize() int64 {
+	d = d.root()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.size
+}
+
+// errSnapshot returns d.err under lock.
+func (d *download) errSnapshot() error {
+	d = d.root()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.err
+}
+
 // toMemory moves the song into memory from a file that takes no more, as
 // on a full disk: it plays on, but is not kept.
 func (d *download) toMemory() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	// What was fetched ahead was in the file only: stop it before closing.
+	if d.ahead != nil {
+		d.ahead.cancel(context.Canceled)
+		d.ahead, d.a0, d.a1 = nil, 0, 0
+	}
+	d.waitWriters()
+	if d.file == nil {
+		return nil
+	}
 	if d.n > maxMemoryDownload {
 		return errDownloadMemory
 	}
@@ -380,11 +542,6 @@ func (d *download) toMemory() error {
 	d.file.Close()
 	os.Remove(d.part)
 	d.file, d.part = nil, ""
-	// What was fetched ahead was in the file only.
-	if d.ahead != nil {
-		d.ahead.cancel(context.Canceled)
-		d.ahead, d.a0, d.a1 = nil, 0, 0
-	}
 	return nil
 }
 
@@ -394,6 +551,10 @@ func (d *download) toMemory() error {
 func (d *download) hand() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.waitWriters()
+	if d.file == nil {
+		return
+	}
 	d.file.Close()
 	path, ok := d.keep(d.part, d.n)
 	f, err := os.Open(path)
@@ -543,23 +704,56 @@ func (w *window) at(off int64, n int) []byte {
 	return w.b[off-w.off : min(int64(len(w.b)), off-w.off+int64(n))]
 }
 
+// rebufferBytes is the small cushion a starved playback reader accumulates
+// after running dry so slow or bursty streams resume cleanly instead of
+// stuttering frame by frame, capped by rebufferMaxWait.
+const (
+	rebufferBytes   = 64 << 10
+	rebufferMaxWait = 500 * time.Millisecond
+)
+
 // A downloadReader reads a download from an offset, waiting for its bytes.
 // It is no io.Seeker, so go-mp3 does not read the whole file up front to
 // find where each frame starts.
 type downloadReader struct {
-	d   *download
-	pos int64
+	d        *download
+	pos      int64
+	rebuffer bool
 }
 
 func (r *downloadReader) Read(p []byte) (int, error) {
 	d := r.d.root()
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	starved := false
 	for d.avail(r.pos) <= 0 && !d.done && r.d.errContext() == nil {
+		starved = true
 		if r.d.parent == nil {
 			d.jump(r.pos)
 		}
 		d.cond.Wait()
+	}
+	if starved && r.rebuffer && r.d.parent == nil && !d.done && r.d.errContext() == nil {
+		want := int64(rebufferBytes)
+		if d.size > r.pos {
+			want = min(want, d.size-r.pos)
+		}
+		if d.avail(r.pos) < want {
+			timedOut, doneWait := false, false
+			timer := time.AfterFunc(rebufferMaxWait, func() {
+				d.mu.Lock()
+				if !doneWait {
+					timedOut = true
+					d.cond.Broadcast()
+				}
+				d.mu.Unlock()
+			})
+			for d.avail(r.pos) < want && !d.done && r.d.errContext() == nil && !timedOut {
+				d.cond.Wait()
+			}
+			doneWait = true
+			timer.Stop()
+		}
 	}
 	if err := r.d.errContext(); err != nil {
 		return 0, err
@@ -605,6 +799,16 @@ func (s *checkedStream) Read(dst []float32) (int, error) {
 	return n, err
 }
 
+func (s *checkedStream) SetPosition(frame int64) error {
+	err := s.stream.SetPosition(frame)
+	if err != nil && err != io.EOF {
+		s.mu.Lock()
+		s.err = err
+		s.mu.Unlock()
+	}
+	return err
+}
+
 // whole reports whether all of the song's bytes came in, without error.
 func (s *checkedStream) whole() bool {
 	dl, _ := s.source()
@@ -615,6 +819,18 @@ func (s *checkedStream) whole() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.done && d.err == nil && (d.size <= 0 || d.n >= d.size)
+}
+
+// hasBytes reports whether the underlying download received any audio bytes.
+func (s *checkedStream) hasBytes() bool {
+	dl, _ := s.source()
+	if dl == nil {
+		return false
+	}
+	d := dl.root()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.n > 0
 }
 
 func (s *checkedStream) Err() error {
@@ -640,7 +856,7 @@ func openStream(dl *download, durationMs int64) (stream, error) {
 		}
 	}
 	off := id3Size(dl)
-	if dl.waitFor(off+4) >= off+4 && string(dl.peek(off, 4)) == "fLaC" {
+	if dl.waitAt(off, 4) && string(dl.peek(off, 4)) == "fLaC" {
 		return openFLACStream(dl)
 	}
 	dl.waitFor(off + 12)
@@ -709,7 +925,7 @@ func openSharedContext(ctx context.Context, dl *download, durationMs int64) (str
 	if !dl.share() {
 		return nil, errors.New("player: the song is gone")
 	}
-	view := &download{parent: dl, ctx: ctx, size: dl.size}
+	view := &download{parent: dl, ctx: ctx, size: dl.totalSize()}
 	stop := context.AfterFunc(ctx, func() {
 		dl.mu.Lock()
 		dl.cond.Broadcast()
@@ -750,27 +966,46 @@ type mp3Stream struct {
 }
 
 func openMP3Stream(dl *download, durationMs int64) (*mp3Stream, error) {
-	s := &mp3Stream{dl: dl, drop: dl.Close}
-	dec, err := gomp3.NewDecoder(&downloadReader{d: dl})
+	start := id3Size(dl)
+	dr := &downloadReader{d: dl, pos: start}
+	dec, err := gomp3.NewDecoder(bufio.NewReaderSize(dr, 64<<10))
 	if err != nil {
 		return nil, err
 	}
-	s.dec, s.rate = dec, dec.SampleRate()
+	dr.rebuffer = dl.parent == nil
+	s := &mp3Stream{dl: dl, dec: dec, rate: dec.SampleRate(), start: start, drop: dl.Close}
 	s.frames = durationMs * int64(s.rate) / 1000
-	s.start = id3Size(dl)
 	s.spec = dl.spectrum(s.rate, s.frames)
 	return s, nil
 }
 
-// id3Size returns the length of the ID3v2 tag at the start of the file.
+// id3Size returns the byte offset past any ID3v2 tags at the start of the
+// file, using waitAt so a large embedded cover can Range-jump cleanly.
 func id3Size(dl *download) int64 {
-	dl.waitFor(10)
-	b := dl.peek(0, 10)
-	if len(b) < 10 || string(b[:3]) != "ID3" {
-		return 0
+	var off int64
+	for range 4 {
+		if !dl.waitAt(off, 10) {
+			return off
+		}
+		b := dl.peek(off, 10)
+		if len(b) < 10 || string(b[:3]) != "ID3" {
+			return off
+		}
+		if b[3] == 0xff || b[4] == 0xff || (b[6]|b[7]|b[8]|b[9])&0x80 != 0 {
+			return off
+		}
+		size := int64(b[6])<<21 | int64(b[7])<<14 | int64(b[8])<<7 | int64(b[9])
+		footer := int64(0)
+		if b[5]&0x10 != 0 {
+			footer = 10
+		}
+		next := off + 10 + size + footer
+		if total := dl.totalSize(); total > 0 && next >= total {
+			return off
+		}
+		off = next
 	}
-	size := int64(b[6]&0x7f)<<21 | int64(b[7]&0x7f)<<14 | int64(b[8]&0x7f)<<7 | int64(b[9]&0x7f)
-	return 10 + size
+	return off
 }
 
 func (s *mp3Stream) SampleRate() int { return s.rate }
@@ -788,6 +1023,10 @@ func (s *mp3Stream) Read(dst []float32) (int, error) {
 		s.skip -= got
 		if err != nil {
 			s.skip = 0
+			if err == io.ErrUnexpectedEOF {
+				err = io.EOF
+			}
+			return 0, err
 		}
 	}
 	got, err := io.ReadFull(s.dec, b)
@@ -816,19 +1055,24 @@ func (s *mp3Stream) Read(dst []float32) (int, error) {
 const preroll = 4 * 1152
 
 func (s *mp3Stream) SetPosition(frame int64) error {
-	var off int64
+	off := s.start
 	if from := frame - preroll; from > 0 && s.frames > 0 {
-		size := s.dl.size
+		size := s.dl.totalSize()
 		if size <= 0 {
 			size = s.dl.waitFor(math.MaxInt64)
 		}
-		off = s.start + int64(float64(size-s.start)*float64(from)/float64(s.frames))
-		off = findFrame(s.dl, off)
+		if size > s.start {
+			off = s.start + int64(float64(size-s.start)*float64(from)/float64(s.frames))
+			off = min(max(off, s.start), size-1)
+			off = findFrame(s.dl, off)
+		}
 	}
-	dec, err := gomp3.NewDecoder(&downloadReader{d: s.dl, pos: off})
+	dr := &downloadReader{d: s.dl, pos: off}
+	dec, err := gomp3.NewDecoder(bufio.NewReaderSize(dr, 64<<10))
 	if err != nil {
 		return err
 	}
+	dr.rebuffer = s.dl.parent == nil
 	s.dec, s.pos = dec, frame
 	// Drop what comes before frame: the preroll, or near the start, all
 	// of it from there.
@@ -877,9 +1121,9 @@ func frameSize(b []byte) int {
 	if len(b) < 4 || b[0] != 0xff || b[1]&0xe0 != 0xe0 {
 		return 0
 	}
-	version := (b[1] >> 3) & 3 // 3: MPEG 1, 2: MPEG 2, 0: MPEG 2.5
+	version := (b[1] >> 3) & 3 // 3: MPEG 1, 2: MPEG 2, 0: MPEG 2.5 (rejected by go-mp3)
 	layer := (b[1] >> 1) & 3   // 1: layer III
-	if version == 1 || layer != 1 {
+	if version < 2 || layer != 1 {
 		return 0
 	}
 	bi, ri := b[2]>>4, (b[2]>>2)&3

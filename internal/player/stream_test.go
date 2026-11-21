@@ -123,6 +123,31 @@ func TestFLACSeek(t *testing.T) {
 	}
 }
 
+// A seek into a FLAC starts decoding less than a second before where it
+// goes, not from the first frame: from there, a song still coming in waits
+// for all of it before. The search for the frame stalled once a guess
+// landed just past the target, and decoded from the start (1.3.3).
+func TestFLACSeekStartsNearTarget(t *testing.T) {
+	b, err := os.ReadFile("testdata/seek.flac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := openStream(downloaded(b), 5000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := s.(*flacStream)
+	rate := int64(fs.info.SampleRate)
+	for target := rate + 1; target < fs.Len(); target += rate / 7 {
+		if err := fs.SetPosition(target); err != nil {
+			t.Fatal(err)
+		}
+		if fs.skip > rate {
+			t.Errorf("seek to %d decodes from %d, %d frames early", target, target-fs.skip, fs.skip)
+		}
+	}
+}
+
 // A FLAC whose metadata block is of a length with bit 2 set plays from its
 // first frame. The block's length was ORed into the 4 bytes of its header
 // rather than added to them, so most of NetEase's lossless songs started 4

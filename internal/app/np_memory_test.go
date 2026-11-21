@@ -41,3 +41,27 @@ func TestNowPlayingReleasesBackdrop(t *testing.T) {
 	runtime.KeepAlive(a)
 	runtime.KeepAlive(tt)
 }
+
+// An intermediate redraw must preserve the frame that settles the transition.
+func TestNowPlayingSettleSurvivesRedraw(t *testing.T) {
+	a := newTestApp()
+	a.pl.Cue([]netease.Track{{ID: 1}})
+	a.nowPlaying = true
+	closed := false
+	tt := ui.NewTester(func(c *ui.Context) {
+		open, settled := a.npState(c)
+		closed = !open && settled
+	}, 160, 100)
+	tt.Advance(time.Second)
+	a.nowPlaying = false
+	tt.Frame()
+	tt.Advance(100 * time.Millisecond)
+	tt.Frame()
+	if closed {
+		t.Fatal("the closing transition settled early")
+	}
+	tt.Advance(npSettle)
+	if !closed {
+		t.Fatal("the closing transition lost its settle frame after a redraw")
+	}
+}

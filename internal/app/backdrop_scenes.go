@@ -648,6 +648,7 @@ type beatState struct {
 	last      float64 // when the last drop fell, in the drift's seconds
 	drops     [sceneDrops]sceneDrop
 	next      int
+	packed    [4 * sceneDrops]float32
 }
 
 // beatGap is the least time between two beats, in seconds, beatLull how
@@ -695,13 +696,12 @@ func (b *beatState) fall(drift float64, hard float32) {
 	b.next = (b.next + 1) % sceneDrops
 }
 
-// uniform returns the drops as the scenes' shaders take them.
+// uniform packs into reusable storage. Shader.Draw copies the values as it builds the operation.
 func (b *beatState) uniform() []float32 {
-	out := make([]float32, 0, 4*sceneDrops)
-	for _, d := range b.drops {
-		out = append(out, d.x, d.y, d.at, d.hard)
+	for i, d := range b.drops {
+		b.packed[4*i], b.packed[4*i+1], b.packed[4*i+2], b.packed[4*i+3] = d.x, d.y, d.at, d.hard
 	}
-	return out
+	return b.packed[:]
 }
 
 // demoDrops are drops as music lets them fall, for a picture of a scene

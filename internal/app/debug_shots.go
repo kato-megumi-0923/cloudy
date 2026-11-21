@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/pprof"
 	"time"
 
@@ -143,6 +144,104 @@ func init() {
 				mark("end")
 				mygo.RunOnMain(mygo.App.Quit)
 				return
+			}
+			if os.Getenv("NM_SCENE") == "mem" {
+				// Now Playing opened and closed a few times over what plays,
+				// then left closed while it plays on, the Go heap marked on
+				// stderr every few seconds: what memory the closed view
+				// keeps, and for how long.
+				// NM_WINDOW=max maximizes the window; =full takes Now Playing to
+				// full screen (F11) each time it opens.
+				window := os.Getenv("NM_WINDOW")
+				mygo.RunOnMain(func() {
+					a.win.SetAlwaysOnTop(true)
+					a.win.Show()
+					if window == "max" {
+						a.win.Maximize()
+					}
+				})
+				openNP := func() {
+					a.nowPlaying, a.npPane = true, paneLyrics
+					if window == "full" {
+						a.setNpFull(true)
+					}
+				}
+				closeNP := func() {
+					a.setNpFull(false)
+					a.nowPlaying = false
+				}
+				memMark := func(s string) {
+					var m runtime.MemStats
+					runtime.ReadMemStats(&m)
+					println("mem", time.Now().Format("15:04:05"), s, "inuse", m.HeapInuse>>20, "idle", m.HeapIdle>>20, "released", m.HeapReleased>>20, "sys", m.Sys>>20, "gc", m.NumGC)
+				}
+				for range 80 {
+					var playing bool
+					mygo.RunOnMain(func() { playing = a.pl.Current() != nil })
+					if playing {
+						break
+					}
+					time.Sleep(250 * time.Millisecond)
+				}
+				time.Sleep(3 * time.Second)
+				step(0, func() { a.volume = 0.02; a.pl.SetVolume(0.02) })
+				memMark("start")
+				for round := range 6 {
+					step(0, openNP)
+					time.Sleep(4 * time.Second)
+					memMark(fmt.Sprint("open", round))
+					step(0, closeNP)
+					time.Sleep(3 * time.Second)
+					memMark(fmt.Sprint("closed", round))
+				}
+				for round := range 6 {
+					step(0, a.toggleDeskLyrics)
+					time.Sleep(2500 * time.Millisecond)
+					step(0, a.toggleDeskLyrics)
+					time.Sleep(2500 * time.Millisecond)
+					memMark(fmt.Sprint("desk", round))
+				}
+				for round := range 6 {
+					step(0, a.showMini)
+					time.Sleep(3 * time.Second)
+					step(0, a.closeMini)
+					time.Sleep(3 * time.Second)
+					memMark(fmt.Sprint("mini", round))
+				}
+				// All of them in quick turns, as a listener trying them does.
+				for round := range 8 {
+					step(0, openNP)
+					time.Sleep(1500 * time.Millisecond)
+					step(0, closeNP)
+					time.Sleep(800 * time.Millisecond)
+					step(0, a.toggleDeskLyrics)
+					time.Sleep(1200 * time.Millisecond)
+					step(0, a.showMini)
+					time.Sleep(1500 * time.Millisecond)
+					step(0, a.closeMini)
+					time.Sleep(1500 * time.Millisecond)
+					step(0, a.toggleDeskLyrics)
+					time.Sleep(1000 * time.Millisecond)
+					memMark(fmt.Sprint("mixed", round))
+				}
+				// Minimized with Now Playing open, as one leaves it playing.
+				step(0, openNP)
+				time.Sleep(3 * time.Second)
+				memMark("npopen")
+				mygo.RunOnMain(a.win.Minimize)
+				for i := range 6 {
+					time.Sleep(5 * time.Second)
+					memMark(fmt.Sprint("npmin", i))
+				}
+				mygo.RunOnMain(a.win.Restore)
+				time.Sleep(3 * time.Second)
+				step(0, closeNP)
+				time.Sleep(3 * time.Second)
+				memMark("idle")
+				for {
+					time.Sleep(5 * time.Second)
+					memMark("after")
+				}
 			}
 			if os.Getenv("NM_SCENE") == "np" {
 				time.Sleep(5 * time.Second)

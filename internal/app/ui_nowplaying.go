@@ -41,9 +41,6 @@ func (a *app) npState(c *ui.Context) (open, settled bool) {
 	now := c.Now()
 	if open != a.npOpen {
 		a.npOpen, a.npChangedAt = open, now
-		// A build once it is at rest: to stop painting what it covers, or
-		// itself once gone.
-		c.After(npSettle)
 		// The window buttons light over its dark backdrop, and as the
 		// theme over the pages (Windows).
 		if a.win != nil {
@@ -54,7 +51,13 @@ func (a *app) npState(c *ui.Context) (open, settled bool) {
 			a.win.SetWindowButtonsTheme(buttons)
 		}
 	}
-	return open, now.Sub(a.npChangedAt) >= npSettle
+	remaining := npSettle - now.Sub(a.npChangedAt)
+	if remaining > 0 {
+		// Each build must ask again. Another redraw during the transition
+		// can replace the previous timer before the backdrop is released.
+		c.After(remaining)
+	}
+	return open, remaining <= 0
 }
 
 // npProgress is shared by the playback view and the page beneath it, so
@@ -73,8 +76,7 @@ func (a *app) npProgress(root ui.Element, open bool) float32 {
 // nowPlayingLayer holds Now Playing over the whole window, growing out of
 // the player bar as it opens and folding back into it as it closes: the
 // bar's shape opens up to the window, showing the view through it, the view
-// staying put where it is at full size, so that nothing in it stretches. It
-// moves its box, not a transform, as a clip moved by one is drawn on the CPU.
+// staying put where it is at full size, so that nothing in it stretches.
 func (a *app) nowPlayingLayer(c *ui.Context, open, settled bool) {
 	w, h := c.Size()
 	k := a.npK
@@ -89,6 +91,9 @@ func (a *app) nowPlayingLayer(c *ui.Context, open, settled bool) {
 	layer := ui.Box(c.Key("now-playing-layer")).Absolute()
 	if !open && settled || a.pl.Current() == nil {
 		// Closed: nothing to paint or click.
+		if a.backdropCache.canvas != nil || a.backdropCache.before != nil {
+			a.releaseSoon()
+		}
 		a.backdropCache = backdropCache{}
 		layer.Top(0).Left(0).Right(0).Bottom(0).Invisible()
 		a.queueAt, a.wallState.track = -1, 0
@@ -106,16 +111,36 @@ func (a *app) nowPlayingLayer(c *ui.Context, open, settled bool) {
 	r := lerpRect(from, ui.Rect{W: w, H: h}, k)
 	layer.Left(r.X).Top(r.Y).Width(r.W).Height(r.H)
 	if k < 1 {
-		layer.Radius(from.H / 2 * (1 - k)).Clip()
+		layer.Clip()
 	}
 	layer.Children(func() {
-		ui.Box(c.Key("now-playing-full")).Absolute().Left(-r.X).Top(-r.Y).Size(w, h).Children(func() {
+		full := ui.Box(c.Key("now-playing-full")).Absolute().Left(-r.X).Top(-r.Y).Size(w, h)
+		if k < 1 {
+			full.Effect(nowPlayingReveal{rect: r, radius: from.H / 2 * (1 - k)})
+		}
+		full.Children(func() {
 			a.nowPlayingView(c)
 			// Over the view, not in it: they don't fade with it, for what they
 			// take over from in the bar has left.
 			a.flights(c, a.pl.Current(), k)
 		})
 	})
+}
+
+// Round the composite in one draw. Clipping the subtree itself makes each
+// transformed child share a changing clip mask the size of the reveal.
+// The composite has the window's fixed size throughout the transition.
+type nowPlayingReveal struct {
+	rect   ui.Rect
+	radius float32
+}
+
+func (nowPlayingReveal) EffectMargin() ui.Point { return ui.Point{} }
+
+func (r nowPlayingReveal) PaintEffect(p *ui.Painter, box ui.Rect, content *ui.Bitmap, inset ui.Point) {
+	scale := p.Scale()
+	src := ui.Rect{X: inset.X, Y: inset.Y, W: box.W * scale, H: box.H * scale}
+	p.Clip(r.rect, r.radius, func() { p.ImageRegion(content, src, box, ui.ImageOptions{}) })
 }
 
 // nowPlayingView fills the window with what plays: its cover over a slow

@@ -104,14 +104,16 @@ func (a *app) settingsPanel(c *ui.Context) {
 		panel.Width(min(940, w-48)).Height(max(h-72, 320)).TextColor(ink.text).Label("设置").TransformOrigin(0, 1)
 		a.pane(panel, 26, false)
 		panel.Children(func() {
-			ui.Row(c).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
-				a.settingsSidebar(c)
-				a.settingsBody(c)
-			})
-			ui.Box(c).Absolute().Top(16).Right(16).Children(func() {
-				if iconButton(c.Key("close"), iconX, 14, ink.muted, "关闭").Background(ink.hover).Clicked() {
-					a.settingsView.open = false
-				}
+			a.scalingBody(c, func() {
+				ui.Row(c).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
+					a.settingsSidebar(c)
+					a.settingsBody(c)
+				})
+				ui.Box(c).Absolute().Top(16).Right(16).Children(func() {
+					if iconButton(c.Key("close"), iconX, 14, ink.muted, "关闭").Background(ink.hover).Clicked() {
+						a.settingsView.open = false
+					}
+				})
 			})
 		})
 	})
@@ -1013,6 +1015,12 @@ func (a *app) settingsSystemPage(k *settingsKit) {
 			if k.button("mini", "打开", nil, false, false).Clicked() {
 				a.settingsView.open = false
 				a.showMini()
+			}
+		})
+		k.row("重置窗口位置", "桌面歌词和迷你窗口回到主屏幕的默认位置，找不到它们时用", func() {
+			if k.button("reset-spots", "重置", nil, false, false).Clicked() {
+				a.resetFloatSpots()
+				a.say("reset-spots", "桌面歌词和迷你窗口已回到默认位置")
 			}
 		})
 	})

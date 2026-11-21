@@ -298,3 +298,14 @@ func TestTrayPopupGlass(t *testing.T) {
 		t.Fatal("a right click right after a dismissal reopened the menu")
 	}
 }
+
+// The card's shadow stays inside the window's transparent margin: past it,
+// the window's edge cut it off square (#22).
+func TestTrayShadowWithinMargin(t *testing.T) {
+	if reach := trayShadowY + trayShadowBlur + trayShadowSpread; reach > trayPopupMargin {
+		t.Fatalf("the shadow reaches %d DIPs below the card, past the %d of margin", reach, trayPopupMargin)
+	}
+	if side := trayShadowBlur + trayShadowSpread; side > trayPopupMargin {
+		t.Fatalf("the shadow reaches %d DIPs beside the card, past the %d of margin", side, trayPopupMargin)
+	}
+}

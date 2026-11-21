@@ -122,3 +122,37 @@ func TestSongURLItemCodesAreUnavailable(t *testing.T) {
 		t.Fatal("no copyright is not unavailable")
 	}
 }
+
+// IP-literal CDN addresses stay on HTTP so TLS hostname checks do not break
+// playback, while domain addresses still upgrade to HTTPS.
+func TestSongURLKeepsIPLiteralHTTP(t *testing.T) {
+	if got := upgradeStreamURL("http://112.25.60.15/m801.music.126.net/song.mp3"); got != "http://112.25.60.15/m801.music.126.net/song.mp3" {
+		t.Fatalf("IP URL was rewritten to %q", got)
+	}
+	if got := upgradeStreamURL("http://m701.music.126.net/song.mp3"); got != "https://m701.music.126.net/song.mp3" {
+		t.Fatalf("domain URL was %q", got)
+	}
+}
+
+// When a lossless request returns an unsupported format such as m4a, SongURL
+// falls back to exhigh MP3 so playback still succeeds.
+func TestSongURLFallbackFromUnsupportedLosslessFormat(t *testing.T) {
+	old := http.DefaultTransport
+	defer func() { http.DefaultTransport = old }()
+	calls := 0
+	http.DefaultTransport = songContextTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		body := `{"code":200,"data":[{"url":"http://audio.test/song.m4a","type":"m4a","size":1000,"level":"lossless"}]}`
+		if calls > 1 {
+			body = `{"code":200,"data":[{"url":"http://audio.test/song.mp3","type":"mp3","size":500,"level":"exhigh"}]}`
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})
+	st, err := SongURL(1, "lossless")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || st.Type != "mp3" || st.Level != "exhigh" {
+		t.Fatalf("fallback failed: calls=%d stream=%+v", calls, st)
+	}
+}

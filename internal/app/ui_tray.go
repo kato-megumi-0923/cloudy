@@ -15,6 +15,9 @@ const (
 	// trayPopupGap is between the icon and the card, not the window: the
 	// window's transparent margin reaches over it.
 	trayPopupGap = 8
+	// The card's shadow: down by Y, blurred by Blur, drawn in by Spread,
+	// it reaches Y+Blur+Spread below the card, within trayPopupMargin.
+	trayShadowY, trayShadowBlur, trayShadowSpread = 8, 22, -8
 )
 
 // trayGlass reports whether the tray menu is glass: it follows 界面玻璃 (or
@@ -217,10 +220,13 @@ func (a *app) trayPopupView(c *ui.Context) {
 		}
 		card := inset(ui.Column(c.Key("tray-card")))
 		if a.trayPopupGlass {
-			a.pane(card, 20, false)
+			a.paneSurface(card, 20, false)
 		} else {
-			card.Radius(20).Background(bg).Border(.5, edge).Shadow(0, 18, 44, -12, ui.RGBA(0, 0, 0, .45))
+			card.Radius(20).Background(bg).Border(.5, edge)
 		}
+		// Its shadow ends within the window's margin: the panes' own, of
+		// a window with room around it, was cut off square at its edges (#22).
+		card.Shadow(0, trayShadowY, trayShadowBlur, trayShadowSpread, ui.RGBA(0, 0, 0, .3))
 		card.TextColor(p.text).Children(func() {
 			ui.Scroll(c.Key("tray-commands")).Fill().Padding(6).Gap(1).
 				Role(ui.RoleMenu).Label("托盘菜单").FocusGroup(ui.Vertical).Children(func() {

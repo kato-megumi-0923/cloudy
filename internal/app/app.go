@@ -31,6 +31,8 @@ const (
 	pageStyle // the day's songs in the styles picked
 	pageLocal // the listener's own music, in the folders they chose
 	pageWeek  // 本周听歌排行, the songs played most in the last seven days
+	// pageHistoryDaily shows the past daily recommendations NetEase keeps.
+	pageHistoryDaily
 )
 
 type route struct {
@@ -157,13 +159,14 @@ type app struct {
 	suggestions suggestState          // what the search field's query may be after
 
 	nowPlaying   bool
-	npFull       bool      // Now Playing taking the whole screen
-	fullHintAt   time.Time // when the bubble telling of F11 first showed in this run
-	sysAccent    string    // the desktop's accent as #RRGGBB, "" where it has none
-	npOpen       bool      // Now Playing as it last showed: open or not
-	npChangedAt  time.Time // when it last opened or closed
-	npPane       int       // paneLyrics, paneQueue, paneStage, paneComments, paneProgram, paneCaptions, paneWall or paneWiki
-	npPaneTop    float32   // how far the cover beside the pane starts below its top
+	npFull       bool        // Now Playing taking the whole screen
+	fullHintAt   time.Time   // when the bubble telling of F11 first showed in this run
+	sysAccent    string      // the desktop's accent as #RRGGBB, "" where it has none
+	npOpen       bool        // Now Playing as it last showed: open or not
+	npChangedAt  time.Time   // when it last opened or closed
+	releaseT     *time.Timer // gives memory back after a view goes (releaseSoon)
+	npPane       int         // paneLyrics, paneQueue, paneStage, paneComments, paneProgram, paneCaptions, paneWall or paneWiki
+	npPaneTop    float32     // how far the cover beside the pane starts below its top
 	lyricScroll  ui.ScrollState
 	lyricGlide   lyricGlide
 	lyricWheel   float32   // the wheel over a lyric value, short of a step
@@ -210,6 +213,7 @@ type app struct {
 	npK                   float32          // how far Now Playing has opened, from 0 to 1
 	npCoverScale          float32          // how its cover stands, which the flight lands at
 	motion                int              // how much the app moves, in this frame
+	dialogScaling         bool             // the dialog being built grows in (scalingBody)
 	playFlies             func(ui.Element) // what hides the play button being built as it flies
 	pageDir               int              // the way the page last changed: 1 in, -1 back, 0 across
 	feedback              feedbackState    // the message being written, in the settings
@@ -272,13 +276,14 @@ type app struct {
 	savedSession string // the session as last kept
 	sessionDue   bool   // a save of the session is due
 
-	style         styleState // the day's songs in the styles picked
-	deck          deckState  // the home page's calendar of the daily and style cards
-	week          weekState  // the songs played most in the last seven days
-	deckDrawer    bool       // the settings' drawer of what the calendar holds is open
-	deckSort      deckSort   // a page dragged to a new place in that drawer
-	queueAdding   bool       // the queue's drawer of playlists to add it to is open
-	radar         radarState // NetEase's radars on the home page
+	style         styleState   // the day's songs in the styles picked
+	deck          deckState    // the home page's calendar of the daily and style cards
+	week          weekState    // the songs played most in the last seven days
+	hist          historyDaily // the past daily recommendations NetEase keeps
+	deckDrawer    bool         // the settings' drawer of what the calendar holds is open
+	deckSort      deckSort     // a page dragged to a new place in that drawer
+	queueAdding   bool         // the queue's drawer of playlists to add it to is open
+	radar         radarState   // NetEase's radars on the home page
 	lyricDownload lyricDownloadState
 	lyricsFolder  lyricsFolderState
 	progressAt    progressShown // what the taskbar button last showed of the song
@@ -455,6 +460,7 @@ func Run() error {
 		a.loadLibraryLater()
 		a.applyTray()
 		a.applyDeskLyrics()
+		mygo.Screen.OnDisplaysChanged(func() { a.post(a.refitFloats) })
 		// The thumbnail's buttons, and their glyphs as the taskbar turns
 		// light or dark.
 		a.readTaskbarDark()

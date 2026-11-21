@@ -31,7 +31,13 @@ func (a *app) inkOn(onDark bool) paneInk {
 // pane gives e the look of a pane, rounded by radius. Glass lightens what
 // shows through in a light theme: a dark pane there takes more of its tint.
 func (a *app) pane(e ui.Element, radius float32, onDark bool) ui.Element {
-	e.Radius(radius).Shadow(0, 18, 44, -12, ui.RGBA(0, 0, 0, 0.45))
+	e.Shadow(0, 18, 44, -12, ui.RGBA(0, 0, 0, 0.45))
+	return a.paneSurface(e, radius, onDark)
+}
+
+// paneSurface is pane without its shadow, for a pane that casts its own.
+func (a *app) paneSurface(e ui.Element, radius float32, onDark bool) ui.Element {
+	e.Radius(radius)
 	dark := onDark || a.pal.dark
 	switch {
 	case a.settings.GlobalGlass:

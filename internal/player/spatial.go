@@ -77,6 +77,7 @@ type orbit struct {
 	rate, angle float64
 	in          line
 	near, far   [2]shadow // each ear's: as it faces the sound, and away
+	tuneIn      int       // samples until shadow filter coefficients retune
 }
 
 func newOrbit(rate float64) *orbit {
@@ -102,11 +103,18 @@ func (o *orbit) run(l, r, speed float64) (float64, float64) {
 	toward, away := o.in.back(1), o.in.back(1+late)
 	gainNear := 1.0
 	gainFar := 1 - 0.55*math.Abs(s)
+	retune := o.tuneIn == 0
+	if retune {
+		o.tuneIn = 32
+	}
+	o.tuneIn--
 	ear := [2]float64{}
 	for ch := range 2 {
 		facing := (ch == 1) == (s >= 0)
-		o.near[ch].set(o.rate, 0.25*behind)
-		o.far[ch].set(o.rate, math.Abs(s)*0.9+0.25*behind)
+		if retune {
+			o.near[ch].set(o.rate, 0.25*behind)
+			o.far[ch].set(o.rate, math.Abs(s)*0.9+0.25*behind)
+		}
 		if facing {
 			ear[ch] = o.near[ch].run(toward) * gainNear
 		} else {

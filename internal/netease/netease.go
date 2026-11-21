@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -296,6 +297,10 @@ func DailySongs() ([]Track, error) {
 	return songs, nil
 }
 
+// songDetails is SongDetails, through a variable so tests can answer
+// without the eapi, which they cannot reach.
+var songDetails = SongDetails
+
 // detailPrivileges gives songs the privileges their details carry for the
 // listener, which are right where other lists have none, or wrong ones.
 func detailPrivileges(songs []Track) {
@@ -303,7 +308,7 @@ func detailPrivileges(songs []Track) {
 	for i := range songs {
 		ids[i] = songs[i].ID
 	}
-	details, _ := SongDetails(ids) // as many as came
+	details, _ := songDetails(ids) // as many as came
 	var privileges []Privilege
 	for _, d := range details {
 		if d.Privilege != nil {
@@ -573,8 +578,23 @@ func SongURL(id int64, level string) (*Stream, error) {
 	return SongURLContext(context.Background(), id, level)
 }
 
+var errUnsupportedFormat = errors.New("unsupported format")
+
 // SongURLContext stops asking for a stream when the listener changes tracks.
 func SongURLContext(ctx context.Context, id int64, level string) (*Stream, error) {
+	st, err := songURLAt(ctx, id, level)
+	if err == nil {
+		return st, nil
+	}
+	if Lossless(level) && errors.Is(err, errUnsupportedFormat) && ctx.Err() == nil {
+		if fb, fbErr := songURLAt(ctx, id, "exhigh"); fbErr == nil {
+			return fb, nil
+		}
+	}
+	return nil, err
+}
+
+func songURLAt(ctx context.Context, id int64, level string) (*Stream, error) {
 	st, err := eapiSongURL(ctx, id, level)
 	if err == nil {
 		return st, nil
@@ -685,8 +705,8 @@ func streamFromSongURLData(code int, d songURLData, level string) (*Stream, erro
 			s.Type = "flac"
 		}
 	}
-	if s.Type != "" && s.Type != "mp3" && s.Type != "flac" && s.Type != "wav" {
-		return nil, fmt.Errorf("unsupported format %s", s.Type)
+	if s.Type != "" && s.Type != "mp3" && s.Type != "flac" {
+		return nil, fmt.Errorf("%w %s", errUnsupportedFormat, s.Type)
 	}
 	if d.Peak != nil {
 		s.Peak = *d.Peak
@@ -696,8 +716,20 @@ func streamFromSongURLData(code int, d songURLData, level string) (*Stream, erro
 	if !slices.Contains(Levels, s.Level) {
 		s.Level = level
 	}
-	s.URL = strings.Replace(d.URL, "http://", "https://", 1)
+	s.URL = upgradeStreamURL(d.URL)
 	return &s, nil
+}
+
+// upgradeStreamURL upgrades domain HTTP stream URLs to HTTPS while leaving
+// IP-literal CDN nodes on HTTP so TLS hostname verification does not fail.
+func upgradeStreamURL(raw string) string {
+	if !strings.HasPrefix(raw, "http://") {
+		return raw
+	}
+	if u, err := url.Parse(raw); err == nil && net.ParseIP(u.Hostname()) != nil {
+		return raw
+	}
+	return strings.Replace(raw, "http://", "https://", 1)
 }
 
 // Lyrics returns a track's timed lyrics, their translation if any, and

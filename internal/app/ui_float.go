@@ -21,24 +21,39 @@ const (
 	miniDisc      = 72 // the cover in the mini window
 )
 
-// spot returns where the lyrics go: where they were left, or at the foot of
-// the screen, centered.
+// spot returns where the lyrics go: where they were left, if that is on a
+// screen still (brought within it), or at the foot of the screen, centered.
 func spot(x, y, w, h, foot int) (int, int) {
+	if !mygo.App.IsReady() {
+		return x, y // no screens to ask about (tests)
+	}
 	if x != 0 || y != 0 {
-		return x, y
+		if fx, fy, ok := fitIn(workAreas(), x, y, w, h); ok {
+			return fx, fy
+		}
 	}
 	wa := mygo.Screen.PrimaryDisplay().WorkArea
 	return wa.X + (wa.Width-w)/2, wa.Y + wa.Height - h - foot
 }
 
-// miniSpot returns where the mini window goes: where it was left, or in the
-// corner, clear of the lyrics.
+// miniSpot returns where the mini window goes: where it was left, on the
+// screen the main window is on, or else in that screen's corner, clear of
+// the lyrics.
 func (a *app) miniSpot(x, y int) (int, int) {
-	if x != 0 || y != 0 {
-		return x, y
+	if !mygo.App.IsReady() {
+		return x, y // no screens to ask about (tests)
 	}
 	w, h := a.miniSize()
-	wa := mygo.Screen.PrimaryDisplay().WorkArea
+	wa := a.mainWorkArea()
+	areas := []mygo.Rectangle{wa}
+	if a.win == nil || !a.win.IsVisible() {
+		areas = workAreas() // no main window to follow
+	}
+	if x != 0 || y != 0 {
+		if fx, fy, ok := fitIn(areas, x, y, w, h); ok {
+			return fx, fy
+		}
+	}
 	return wa.X + wa.Width - w - 24, wa.Y + wa.Height - h - 24
 }
 
@@ -118,6 +133,7 @@ func (a *app) dropFloat(slot **mygo.Window) {
 	*slot = nil
 	win.Hide()
 	a.post(win.Destroy)
+	a.releaseSoon()
 }
 
 // toggleDeskLyrics turns them on or off, from wherever that is offered.

@@ -282,6 +282,7 @@ type poolLeaf struct {
 type leafState struct {
 	leaves  [poolLeaves]poolLeaf
 	started bool
+	packed  [4 * poolLeaves]float32
 }
 
 // leafEdge is how far past an edge of the picture a leaf is gone, or
@@ -382,9 +383,10 @@ func (ls *leafState) enter(l *poolLeaf, aspect float32) {
 	l.alive = true
 }
 
-// uniform returns the leaves as the pool's shaders take them.
+// uniform reuses the buffer that Shader.Draw reads while building the operation.
 func (ls *leafState) uniform(aspect float32) []float32 {
-	out := make([]float32, 4*poolLeaves)
+	out := ls.packed[:]
+	clear(out)
 	if aspect <= 0 {
 		return out
 	}

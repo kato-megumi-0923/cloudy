@@ -266,10 +266,7 @@ func (a *app) stageWord(c *ui.Context, word lyrics.Word, s wordShape, pos time.D
 
 	box := ui.Box(c).MarginEnd(s.margin).Translate(x, y).Rotate(rotate).Scale(scale, scale).Opacity(opacity)
 	box.Children(func() {
-		text := ui.Text(c.Key("body"), word.Text).FontSize(f).FontWeight(800).NoWrap().TextColor(color)
-		if blur > 0.3 {
-			text.Blur(blur)
-		}
+		a.stageWordBody(c.Key("body"), word.Text, f, s.scale, blur, color)
 		if glow > 0.01 {
 			// The glow: the word again, in light, blurred around it.
 			ui.Text(c.Key("glow"), word.Text).Absolute().Top(0).Left(0).FontSize(f).FontWeight(800).NoWrap().
@@ -278,6 +275,51 @@ func (a *app) stageWord(c *ui.Context, word lyrics.Word, s wordShape, pos time.D
 	})
 	if a.settings.StageSparks {
 		stageSparks(box, float32((pos - word.Start).Seconds()), float64(word.Start/time.Millisecond), s.last, accent)
+	}
+}
+
+func (a *app) stageWordBody(c *ui.Context, word string, size, wordScale, blur float32, color ui.Color) {
+	if !a.settings.StageHiRes {
+		text := ui.Text(c, word).FontSize(size).FontWeight(800).NoWrap().TextColor(color)
+		if blur > 0.3 {
+			text.Blur(blur)
+		}
+		return
+	}
+
+	rasterSize := stageWordRasterSize(size, wordScale)
+	body := ui.Box(c)
+	if blur > 0.3 {
+		body.Blur(blur)
+	}
+	body.Children(func() {
+		ui.Text(c.Key("layout"), word).FontSize(size).FontWeight(800).NoWrap().Invisible()
+		inkScale := size / rasterSize
+		ui.Text(c.Key("ink"), word).FontSize(rasterSize).FontWeight(800).NoWrap().TextColor(color).
+			Absolute().Left(0).Top(0).TransformOrigin(0, 0).Scale(inkScale, inkScale)
+	})
+}
+
+// stageWordRasterSize keeps the ink size stable through the animation, with
+// room for spring overshoot and the enclosing row's swell.
+func stageWordRasterSize(size, wordScale float32) float32 {
+	rasterSize := float32(128)
+	switch {
+	case size <= 32:
+		rasterSize = 64
+	case size <= 48:
+		rasterSize = 96
+	}
+	peak := size * wordScale * 1.4 * 1.1
+	switch {
+	case peak*1.25 <= rasterSize:
+		return rasterSize
+	case peak*1.5 <= 128:
+		return 128
+	case peak*1.5 <= 160:
+		return 160
+	default:
+		return 192
 	}
 }
 

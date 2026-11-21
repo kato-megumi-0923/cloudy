@@ -184,6 +184,7 @@ type shaper struct {
 	filters         [nFilters]biquad
 	state           [nFilters][2]biquadState
 	pre             float64 // the gain before, that leaves room for what is lifted
+	makeup          float64 // precomputed compressor makeup gain
 	vocal           biquad  // the voice lifted, in the middle only
 	voice           biquadState
 	env             float64 // how loud the sound is now, for the compressor
@@ -233,6 +234,7 @@ func (s *shaper) tune(e Effects) {
 	// What is lifted could clip: the whole comes down as far as the most
 	// lifted, a little less, for music seldom fills every band at once.
 	s.pre = math.Pow(10, -most*0.8/20)
+	s.makeup = math.Pow(10, e.Loudness*compressMakeup/20)
 	if e.Room != s.roomID {
 		s.roomID, s.room = e.Room, nil
 		if r := roomOf(e.Room); r != nil {
@@ -354,7 +356,7 @@ func (s *shaper) sample(l, r float64) (float32, float32) {
 		} else {
 			s.env += s.release * (level - s.env)
 		}
-		g := math.Pow(10, e.Loudness*compressMakeup/20)
+		g := s.makeup
 		if db := 20 * math.Log10(s.env+1e-9); db > compressThreshold {
 			ratio := 1 + 3*e.Loudness
 			g *= math.Pow(10, (db-compressThreshold)*(1/ratio-1)/20)

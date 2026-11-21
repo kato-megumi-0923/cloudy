@@ -32,41 +32,72 @@ type flacStream struct {
 }
 
 func openFLACStream(dl *download) (*flacStream, error) {
-	start, err := flacDataStart(dl)
-	if err != nil {
-		return nil, err
-	}
 	from := id3Size(dl)
-	st, err := flac.New(bytes.NewReader(dl.peek(from, int(start-from))))
+	info, err := flacStreamInfo(dl, from)
 	if err != nil {
 		return nil, err
 	}
-	s := &flacStream{dl: dl, info: st.Info, start: start, drop: dl.Close}
+	start, err := flacDataStartFrom(dl, from)
+	if err != nil {
+		return nil, err
+	}
+	s := &flacStream{dl: dl, info: info, start: start, drop: dl.Close}
 	if s.info.NChannels == 0 || s.info.SampleRate == 0 {
 		return nil, errors.New("flac: no stream info")
 	}
 	s.spec = dl.spectrum(int(s.info.SampleRate), int64(s.info.NSamples))
-	s.r = bufio.NewReaderSize(&downloadReader{d: dl, pos: start}, 64<<10)
+	s.r = bufio.NewReaderSize(&downloadReader{d: dl, pos: start, rebuffer: dl.parent == nil}, 64<<10)
 	return s, nil
+}
+
+// flacStreamInfo parses only the mandatory 34-byte STREAMINFO block at from,
+// avoiding strict parsing of trailing metadata blocks and avoiding downloading
+// multi-megabyte embedded PICTURE blocks before playback can begin.
+func flacStreamInfo(dl *download, from int64) (*meta.StreamInfo, error) {
+	const headerBytes = 4 + 4 + 34
+	if !dl.waitAt(from, headerBytes) {
+		return nil, io.ErrUnexpectedEOF
+	}
+	head := dl.peek(from, headerBytes)
+	if len(head) < headerBytes || string(head[:4]) != "fLaC" {
+		return nil, errors.New("flac: not a FLAC file")
+	}
+	blockLen := int(head[5])<<16 | int(head[6])<<8 | int(head[7])
+	if head[4]&0x7f != 0 || blockLen != 34 {
+		return nil, errors.New("flac: missing STREAMINFO block")
+	}
+	head[4] |= 0x80 // mark STREAMINFO as the last block for flac.New
+	st, err := flac.New(bytes.NewReader(head))
+	if err != nil {
+		return nil, err
+	}
+	return st.Info, nil
 }
 
 // flacDataStart returns where a FLAC file's first frame starts, after its
 // ID3 tag, if any, and its metadata blocks.
 func flacDataStart(dl *download) (int64, error) {
-	off := id3Size(dl)
-	if dl.waitFor(off+4) < off+4 || string(dl.peek(off, 4)) != "fLaC" {
+	return flacDataStartFrom(dl, id3Size(dl))
+}
+
+func flacDataStartFrom(dl *download, from int64) (int64, error) {
+	off := from
+	if !dl.waitAt(off, 4) || string(dl.peek(off, 4)) != "fLaC" {
 		return 0, errors.New("flac: not a FLAC file")
 	}
 	off += 4
 	for {
-		if dl.waitFor(off+4) < off+4 {
+		if !dl.waitAt(off, 4) {
 			return 0, io.ErrUnexpectedEOF
 		}
 		h := dl.peek(off, 4)
+		if len(h) < 4 {
+			return 0, io.ErrUnexpectedEOF
+		}
 		last := h[0]&0x80 != 0
 		off += 4 + (int64(h[1])<<16 | int64(h[2])<<8 | int64(h[3]))
 		if last {
-			if dl.waitFor(off) < off {
+			if !dl.waitAt(off, 1) {
 				return 0, io.ErrUnexpectedEOF
 			}
 			return off, nil
@@ -154,27 +185,45 @@ func (s *flacStream) decode(f *frame.Frame) {
 // what comes before it there. It finds that frame by the secant method,
 // guessing where in the bytes it is from the frames found on either side,
 // until one is found less than a second before it.
+//
+// A guess just past the target found the frame there again and again, so
+// the frame before it was never found, and the song decoded from its start:
+// one still coming in waited for all of it before (1.3.3). Each guess aims
+// half a second early, and halves the bytes between instead when the last
+// one moved the same side, or found no frame.
 func (s *flacStream) SetPosition(target int64) error {
 	total := int64(s.info.NSamples)
-	size := s.dl.size
+	size := s.dl.totalSize()
 	if size <= 0 {
 		size = s.dl.waitFor(math.MaxInt64)
 	}
+	rate := int64(s.info.SampleRate)
 	loOff, lo := s.start, int64(0)
 	hiOff, hi := size, total
-	for tries := 0; tries < 8 && target-lo > int64(s.info.SampleRate) && hi > lo; tries++ {
-		guess := loOff + int64(float64(hiOff-loOff)*float64(target-lo)/float64(hi-lo))
-		off, at, ok := s.frameAfter(max(guess, loOff+1), hiOff)
-		if !ok {
-			break
-		}
-		if at > target {
-			hiOff, hi = off, at
+	side, halve := 0, false // the side the last guess moved: -1 lo, 1 hi
+	for tries := 0; tries < 24 && target-lo > rate && hi > lo && hiOff-loOff > 2; tries++ {
+		var guess int64
+		if halve {
+			guess = loOff + (hiOff-loOff)/2
 		} else {
+			aim := max(lo, target-rate/2)
+			guess = loOff + int64(float64(hiOff-loOff)*float64(aim-lo)/float64(hi-lo))
+		}
+		guess = max(guess, loOff+1)
+		off, at, ok := s.frameAfter(guess, hiOff)
+		switch {
+		case !ok:
+			// No frame starts from guess on: the one holding it starts before.
+			hiOff, side, halve = guess, 1, true
+		case at > target:
+			hiOff, hi = off, at
+			halve, side = side == 1, 1
+		default:
 			loOff, lo = off, at
+			halve, side = side == -1, -1
 		}
 	}
-	s.r = bufio.NewReaderSize(&downloadReader{d: s.dl, pos: loOff}, 64<<10)
+	s.r = bufio.NewReaderSize(&downloadReader{d: s.dl, pos: loOff, rebuffer: s.dl.parent == nil}, 64<<10)
 	s.pos, s.skip, s.pend = target, target-lo, s.pend[:0]
 	return nil
 }
