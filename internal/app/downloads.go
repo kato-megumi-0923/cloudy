@@ -425,6 +425,7 @@ func (a *app) downloadBytes() int64 {
 // started from.
 func (a *app) noteDownloads() {
 	a.dl.rev++
+	a.applyOwnCovers(a.dl.items)
 	files := make(map[int64]string, len(a.dl.items))
 	for _, it := range a.dl.items {
 		if id := it.Track.ID; id > 0 && files[id] == "" {
@@ -709,6 +710,9 @@ func (a *app) downloadedSongActions(tr *netease.Track) [][]menuAction {
 		{{label: "在文件夹中显示", icon: iconFolder, do: func() { mygo.Shell.ShowItemInFolder(tr.LocalPath) }}},
 	}
 	groups = append(groups, []menuAction{{label: "下载歌词", icon: iconLyrics, do: func() { a.openLyricDownload(song) }}})
+	if tr.LocalPath != "" {
+		groups = append(groups, a.ownCoverActions(ownSongKey(tr.LocalPath), tr.LocalPath))
+	}
 	// Only what Cloudy downloaded: the listener's own music stays theirs.
 	if a.inDownloads(tr.LocalPath) {
 		groups = append(groups, []menuAction{{label: "从本地删除", icon: iconTrash, do: func() { a.confirmDeleteDownload(*tr) }}})

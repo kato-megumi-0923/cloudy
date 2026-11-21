@@ -29,17 +29,18 @@ import (
 type download struct {
 	// A shared decoder has its own cancellable view of the same bytes.
 	// Cancelling it wakes only that reader, leaving playback's download alive.
-	parent *download
-	ctx    context.Context
-	mu     sync.Mutex
-	cond   sync.Cond
-	file   *os.File // where the song is, or nil: then data
-	data   []byte
-	n      int64 // the bytes in so far
-	size   int64 // expected, or 0 if unknown
-	done   bool
-	err    error
-	cancel context.CancelFunc
+	parent   *download
+	ctx      context.Context
+	dropView func()
+	mu       sync.Mutex
+	cond     sync.Cond
+	file     *os.File // where the song is, or nil: then data
+	data     []byte
+	n        int64 // the bytes in so far
+	size     int64 // expected, or 0 if unknown
+	done     bool
+	err      error
+	cancel   context.CancelFunc
 	// part is the file's path until the cache keeps it, which keep does
 	// once the song has all come in: the path it is at then.
 	part   string
@@ -412,6 +413,10 @@ func (d *download) hand() {
 // Close stops the download and wakes its readers: the stream lets the
 // song go.
 func (d *download) Close() {
+	if d.dropView != nil {
+		d.dropView()
+		return
+	}
 	d.cancel()
 	d.mu.Lock()
 	if !d.done {
@@ -638,7 +643,56 @@ func openStream(dl *download, durationMs int64) (stream, error) {
 	if dl.waitFor(off+4) >= off+4 && string(dl.peek(off, 4)) == "fLaC" {
 		return openFLACStream(dl)
 	}
+	dl.waitFor(off + 12)
+	if format := otherFormat(dl.peek(off, 12)); format == "DSD" {
+		if s, err := openDSDStream(dl); err == nil {
+			return s, nil
+		}
+		return nil, &UnsupportedError{Format: format}
+	} else if format != "" {
+		if s, err := openOther(dl, durationMs, format); err == nil {
+			return s, nil
+		}
+		return nil, &UnsupportedError{Format: format}
+	}
 	return openMP3Stream(dl, durationMs)
+}
+
+// UnsupportedError is audio in a format the player cannot decode. The MP3
+// decoder, given it, read the whole file looking for a frame and failed,
+// and the song was fetched again and again: it stayed "loading" (AAC from
+// a viewer's cloud drive, 1.3.2). Such a song is skipped.
+type UnsupportedError struct {
+	Format string
+}
+
+func (e *UnsupportedError) Error() string {
+	return "暂不支持播放 " + e.Format + " 格式的音频"
+}
+
+// otherFormat names the format of audio starting with head when it is one
+// the player knows it cannot decode, or is "".
+func otherFormat(head []byte) string {
+	switch {
+	case len(head) >= 8 && string(head[4:8]) == "ftyp":
+		return "AAC (M4A)"
+	case len(head) >= 2 && head[0] == 0xff && head[1]&0xf6 == 0xf0:
+		// ADTS: the sync word with its layer bits zero, which MP3's never are.
+		return "AAC"
+	case len(head) >= 4 && string(head[:4]) == "OggS":
+		return "OGG"
+	case len(head) >= 4 && string(head[:4]) == "RIFF":
+		return "WAV"
+	case len(head) >= 4 && (string(head[:4]) == "wvpk" || string(head[:4]) == "MAC "):
+		return "无损压缩（APE/WV）"
+	case len(head) >= 4 && string(head[:4]) == "DSD ":
+		return "DSD"
+	case len(head) >= 4 && string(head[:4]) == "FRM8":
+		return "DSD"
+	case len(head) >= 4 && head[0] == 0x30 && head[1] == 0x26 && head[2] == 0xb2 && head[3] == 0x75:
+		return "WMA"
+	}
+	return ""
 }
 
 // openShared opens a second stream of what dl fetches, for decoding apart
@@ -661,21 +715,21 @@ func openSharedContext(ctx context.Context, dl *download, durationMs int64) (str
 		dl.cond.Broadcast()
 		dl.mu.Unlock()
 	})
-	drop := func() { stop(); dl.release() }
+	view.dropView = sync.OnceFunc(func() { stop(); dl.release() })
 	s, err := openStream(view, durationMs)
 	if err != nil {
-		drop()
+		view.Close()
 		return nil, err
 	}
-	switch s := s.(type) {
-	case *mp3Stream:
-		s.spec, s.drop = nil, drop
-	case *flacStream:
-		s.spec, s.drop = nil, drop
-	case *wavStream:
-		s.spec, s.drop = nil, drop
-	}
 	return s, nil
+}
+
+// spectrum belongs to the stream playing, not another decoder of its bytes.
+func (d *download) spectrum(rate int, frames int64) *spectrum {
+	if d.parent != nil {
+		return nil
+	}
+	return newSpectrum(rate, frames)
 }
 
 // mp3Stream decodes a download for package audio, seeking by bytes: songs
@@ -704,7 +758,7 @@ func openMP3Stream(dl *download, durationMs int64) (*mp3Stream, error) {
 	s.dec, s.rate = dec, dec.SampleRate()
 	s.frames = durationMs * int64(s.rate) / 1000
 	s.start = id3Size(dl)
-	s.spec = newSpectrum(s.rate, s.frames)
+	s.spec = dl.spectrum(s.rate, s.frames)
 	return s, nil
 }
 

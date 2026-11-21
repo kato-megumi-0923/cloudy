@@ -14,6 +14,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/audio"
 
+	"netease-music-mygo/internal/local"
 	"netease-music-mygo/internal/lyrics"
 	"netease-music-mygo/internal/netease"
 )
@@ -889,7 +890,7 @@ func (p *Player) loadAttempt(at, skipped int, play bool, from time.Duration, dir
 			})
 			// Shown already, the lines are swapped for ones sung word by
 			// word if another source has them.
-			if wantsMoreWords(t, lines) {
+			if wantsMoreWords(t, lines) || wantsFoundLyrics(t, lines) {
 				if more := MoreWords(t); len(more) > 0 {
 					more = lyrics.KeepTranslations(more, lines)
 					p.post(func() {
@@ -951,7 +952,9 @@ func (p *Player) opened(gen int, t netease.Track, info *netease.Stream, s stream
 			return
 		}
 		p.err = err.Error()
+		var format *UnsupportedError
 		switch {
+		case errors.As(err, &format):
 		case unplayable(err) && !errors.Is(err, netease.ErrUnavailable):
 			p.err = "获取不到这首歌的播放地址"
 		case !errors.Is(err, netease.ErrUnavailable):
@@ -1028,7 +1031,8 @@ var lyricsOf = netease.Lyrics
 
 var errNoLyrics = errors.New("player: no lyrics")
 
-// openLocal opens the song in the file at path, an MP3, FLAC or WAV.
+// openLocal opens the song in the file at path, of a format local.Playable
+// takes.
 func openLocal(path string, d int64) (*netease.Stream, stream, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -1040,13 +1044,16 @@ func openLocal(path string, d int64) (*netease.Stream, stream, error) {
 		return nil, nil, fmt.Errorf("本地文件无法读取：%s", filepath.Base(path))
 	}
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
-	if ext != "mp3" && ext != "flac" && ext != "wav" {
+	if !local.Playable("." + ext) {
 		f.Close()
-		return nil, nil, fmt.Errorf("不支持的本地音乐格式：%s", ext)
+		return nil, nil, &UnsupportedError{Format: strings.ToUpper(ext)}
 	}
 	st := &netease.Stream{Size: info.Size(), Type: ext, Level: "exhigh", Path: path}
-	if ext == "flac" || ext == "wav" {
+	switch ext {
+	case "flac":
 		st.Level = "lossless"
+	case "dsf", "dff":
+		st.Level = "hires"
 	}
 	s, err := openStream(opened(f, info.Size()), d)
 	if err != nil {

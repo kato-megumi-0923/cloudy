@@ -29,6 +29,9 @@ type Item struct {
 	// Tagged says its file carries its title, cover, lyrics and NetEase ID,
 	// which Cloudy wrote into it.
 	Tagged bool `json:"tagged,omitempty"`
+	// Matched says a file the listener put in the folder was found on
+	// NetEase: the index knows its song, and the file is left as it is.
+	Matched bool `json:"matched,omitempty"`
 	// Numbered says the file's track and disc numbers were read into
 	// Track (No, Cd), which indexes before 1.2.13 lack: such a file is
 	// read once more.

@@ -194,6 +194,7 @@ type app struct {
 	effects     effectsView // the pane of the sound effects
 	auto        autoState   // the effects chosen for the song playing
 	mutedFrom   float64
+	volumeSave  *time.Timer // keeps the volume a moment after it last moved
 
 	rowBars barState
 	// underTop and underBottom say whether the page has content under its
@@ -261,9 +262,11 @@ type app struct {
 
 	// The songs saved to disk, the ones on their way there, and where both
 	// are kept.
-	dl     downloadState
-	lib    localLibrary
-	opened *openedFiles // the songs opened with Cloudy, coming in
+	dl  downloadState
+	lib localLibrary
+	// The covers the listener chose for their playlists and songs.
+	ownCovers ownCovers
+	opened    *openedFiles // the songs opened with Cloudy, coming in
 
 	restored     bool   // playback picked up where it was left
 	savedSession string // the session as last kept
@@ -386,6 +389,7 @@ func Run() error {
 		a.pl.SetEffects(a.currentEffects(), false)
 		a.pl.Quality = func() string { return a.settings.Quality }
 		a.useMoreWords()
+		a.useOwnCovers()
 		a.pl.Normalize = func() bool { return a.settings.Normalize }
 		a.pl.Crossfade = a.crossfade
 		a.pl.Cache = newSongCache(a.settings.CacheFolder, a.settings.CacheMB)
@@ -485,13 +489,25 @@ func Run() error {
 		})
 	})
 	a.followProgress()
-	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
-		a.quitting = true
+	keep := func() {
 		a.settings.Volume = a.volume
 		a.settings.save()
 		a.saveSession()
 		if write := a.transcriptWrite(); write != nil {
 			write()
+		}
+	}
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
+		a.quitting = true
+		keep()
+	})
+	// Windows ending the session (shutting down, signing out) ends the app
+	// without a quit: what was kept would be lost, the volume back at 80%
+	// at every start (a viewer, 1.3.2).
+	mygo.App.OnQuit(func() {
+		if !a.quitting {
+			a.quitting = true
+			keep()
 		}
 	})
 	// Windows leaves an icon in the notification area after its app until

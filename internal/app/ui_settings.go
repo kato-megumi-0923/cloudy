@@ -892,7 +892,7 @@ func (a *app) settingsStoragePage(k *settingsKit) {
 				}
 			})
 		}
-		k.row("添加文件夹", "读取文件夹和子文件夹里的 MP3、FLAC、WAV，显示在「本地音乐」，文件夹有变化时自动更新", func() {
+		k.row("添加文件夹", "读取文件夹和子文件夹里支持的音频，显示在「本地音乐」，文件夹有变化时自动更新", func() {
 			if k.button("local-add", "添加…", iconPlus, false, false).Clicked() {
 				a.pickLibraryFolder()
 			}

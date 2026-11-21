@@ -252,7 +252,7 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *netease.Track, art *artwork, acc
 		coverA := big(h-bar-npRowFoot-2*(npTabsHeight+npTabsGap), under)
 		coverC := coverA
 		if a.settings.NpCalm {
-			coverC = max(coverA, big(h-bar, under-cs.foldedTotal()))
+			coverC = max(coverA, big(h-bar-npCalmFoot, under-cs.foldedTotal()))
 		}
 		// With some slack, for a window resized about the threshold not to
 		// go between the two at every step.
@@ -290,7 +290,7 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *netease.Track, art *artwork, acc
 		// Calming, the controls first fade (npCalmFade), then the column
 		// closes up and the cover grows, on one curve (npCalmLay).
 		// Calm, the room under the column for the lyrics' tools is gone.
-		foot := npRowFoot * (1 - lay)
+		foot := lerp(npRowFoot, npCalmFoot, lay)
 		padX := npSideX(w)
 		a.more.npPaneW = w - 2*padX - side - npGapX(w)
 		tabs := npTabsRow(c, w)
@@ -527,8 +527,12 @@ const npLyricEdge = 72
 const npTabsHeight = 28
 
 const (
-	npTabsGap    = 16  // between the tabs and the cover under them, at least
-	npRowFoot    = 44  // under the cover's column, for the lyrics' tools
+	npTabsGap = 16 // between the tabs and the cover under them, at least
+	npRowFoot = 44 // under the cover's column, for the lyrics' tools
+	// npCalmFoot is kept under the column calm: with none, a wide window
+	// at its least height grew the cover until the progress touched its
+	// foot, half out of sight (the user, 1.3.3-test.1).
+	npCalmFoot   = 28
 	npRestGuess  = 270 // what goes under the cover, before it is laid out
 	npCoverLeast = 96  // the cover's least size, in the shortest window
 	npSideLeast  = 280 // how narrow the cover's column goes

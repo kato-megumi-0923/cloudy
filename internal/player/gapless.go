@@ -109,8 +109,8 @@ func (p *Player) level() string {
 
 // fetchLyrics fetches a track's lyrics. A downloaded song is still
 // NetEase's, whose lyrics it fetches; a file put in the folder by hand has
-// only the .lrc beside it, if any, which is also what a downloaded song
-// falls back to offline.
+// only the .lrc beside it, if any, or those written into it, which is also
+// what a downloaded song falls back to offline, or when NetEase has none.
 func fetchLyrics(t netease.Track) []lyrics.Line {
 	var lines []lyrics.Line
 	var err error = errNoLyrics
@@ -120,7 +120,7 @@ func fetchLyrics(t netease.Track) []lyrics.Line {
 			lines = lyrics.Build(lrc, trans, yrc)
 		}
 	}
-	if err != nil && t.LocalPath != "" {
+	if len(lines) == 0 && t.LocalPath != "" {
 		if b, e := os.ReadFile(strings.TrimSuffix(t.LocalPath, filepath.Ext(t.LocalPath)) + ".lrc"); e == nil {
 			lines = lyrics.FromText(string(b))
 		}
@@ -140,6 +140,13 @@ var MoreWords func(t netease.Track) []lyrics.Line
 // words running at one pace, and so worth looking for elsewhere.
 func wantsMoreWords(t netease.Track, lines []lyrics.Line) bool {
 	return MoreWords != nil && t.ID > 0 && t.ProgramID == 0 && len(lines) > 0 && !lyrics.IsPlain(lines) && !anyTimed(lines)
+}
+
+// wantsFoundLyrics reports whether t, a song of the listener's cloud drive
+// with no lyrics on NetEase, neither in the catalog nor in the drive, is
+// worth looking for elsewhere by its name, artists and length.
+func wantsFoundLyrics(t netease.Track, lines []lyrics.Line) bool {
+	return MoreWords != nil && t.ID > 0 && t.ProgramID == 0 && len(lines) == 0 && t.Privilege != nil && t.Privilege.Cs
 }
 
 func anyTimed(lines []lyrics.Line) bool {

@@ -76,6 +76,7 @@ func (a *app) loadLibrary(scan bool) {
 // setLibrary shows items, sorted as the downloads are: newest first.
 func (a *app) setLibrary(items []download.Item) {
 	sortDownloads(items)
+	a.applyOwnCovers(items)
 	a.lib.items = items
 	tracks := make([]netease.Track, 0, len(items))
 	for _, it := range items {

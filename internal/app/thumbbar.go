@@ -79,7 +79,9 @@ func (a *app) syncThumbs() {
 			// breath, DWM measures the new one afresh.
 			a.win.SetThumbnail(nil)
 		}
-		a.win.SetThumbnail(a.pl.Cover())
+		// Match the player bar for animated WebP art: the system's
+		// image decoder needs a still frame rather than the animation.
+		a.win.SetThumbnail(stillCover(a.pl.Cover()))
 	}
 	if st.track == 0 {
 		a.win.SetThumbButtons(nil)

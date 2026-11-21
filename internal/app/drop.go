@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/egoist/mygo"
 
@@ -17,8 +16,7 @@ import (
 // mistake is not read to the end.
 const mostDropped = 2000
 
-// listenForDrops plays the songs dropped on the window: files, and the songs
-// in folders, MP3, FLAC and WAV.
+// listenForDrops plays supported audio files and folders dropped on the window.
 func (a *app) listenForDrops() {
 	a.win.OnFileDrop(func(e *mygo.FileDropEvent) {
 		paths := slices.Clone(e.Paths)
@@ -56,10 +54,9 @@ func droppedTracks(paths []string, artDir string) (tracks []netease.Track, other
 			continue
 		}
 		if !info.IsDir() {
-			switch strings.ToLower(filepath.Ext(path)) {
-			case ".mp3", ".flac", ".wav":
+			if local.Playable(filepath.Ext(path)) {
 				add(path)
-			default:
+			} else {
 				other++
 			}
 			continue
@@ -81,7 +78,7 @@ func droppedTracks(paths []string, artDir string) (tracks []netease.Track, other
 // dropped alone was all there was to skip to, and played again.
 func (a *app) playDropped(tracks []netease.Track, other int) {
 	if len(tracks) == 0 {
-		a.toast = "只能播放 MP3、FLAC 和 WAV 文件"
+		a.toast = "没有找到支持的音频文件"
 		a.redraw()
 		return
 	}
@@ -97,7 +94,7 @@ func (a *app) playDropped(tracks []netease.Track, other int) {
 		msg = "正在播放：" + tracks[0].Name
 	}
 	if other > 0 {
-		msg += fmt.Sprintf("（%d 个文件不是 MP3、FLAC 或 WAV，已跳过）", other)
+		msg += fmt.Sprintf("（已跳过 %d 个不支持的文件）", other)
 	}
 	a.toast = msg
 	a.redraw()

@@ -119,6 +119,7 @@ func (a *app) toggleWindow() {
 func (a *app) nudgeVolume(by float64) {
 	a.volume = math.Max(0, math.Min(a.volume+by, 1))
 	a.pl.SetVolume(a.volume)
+	a.keepVolume()
 }
 
 // sleepChoices are how long music can play on for.

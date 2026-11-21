@@ -28,7 +28,7 @@ func openWAVStream(dl *download) (*wavStream, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &wavStream{dl: dl, info: info, spec: newSpectrum(int(info.Rate), info.Frames()), drop: dl.Close}, nil
+	return &wavStream{dl: dl, info: info, spec: dl.spectrum(int(info.Rate), info.Frames()), drop: dl.Close}, nil
 }
 
 func (s *wavStream) SampleRate() int                { return int(s.info.Rate) }

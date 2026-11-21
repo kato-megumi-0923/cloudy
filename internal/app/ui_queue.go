@@ -117,13 +117,13 @@ func (a *app) queueRows(c *ui.Context, list *ui.ListState, at *int, look queueLo
 
 // queueButton opens the queue from the player bar, in a pane over the
 // page: the songs to play, the one playing in view.
-func (a *app) queueButton(c *ui.Context, color ui.Color) {
+func (a *app) queueButton(c *ui.Context, color ui.Color, size float32) {
 	q := &a.more.queue
 	tint := color
 	if q.open {
 		tint = a.pal.accent
 	}
-	b := iconButton(c.Key("queue-button"), iconQueue, 16, tint, "播放列表")
+	b := iconButton(c.Key("queue-button"), iconQueue, size, tint, "播放列表")
 	if b.Clicked() {
 		q.open = !q.open
 	}

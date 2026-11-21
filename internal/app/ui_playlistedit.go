@@ -475,6 +475,7 @@ func (a *app) deletePlaylistDialog(c *ui.Context) {
 func (a *app) playlistMenu(pl *netease.Playlist) [][]menuAction {
 	return [][]menuAction{
 		{{label: "重命名…", do: func() { a.startRename(pl) }}},
+		a.ownCoverActions(ownPlaylistKey(pl.ID), ""),
 		{{label: "删除歌单…", do: func() { a.confirmDelete(pl) }}},
 	}
 }

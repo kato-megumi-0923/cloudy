@@ -172,7 +172,16 @@ type ChartLine struct {
 	Second string `json:"second"`
 }
 
+// PlaylistCover, if set, gives the cover the listener chose in Cloudy for
+// the playlist with id, or "" for its own.
+var PlaylistCover func(id int64) string
+
 func (p *Playlist) Cover() string {
+	if PlaylistCover != nil {
+		if own := PlaylistCover(p.ID); own != "" {
+			return own
+		}
+	}
 	if p.CoverURL != "" {
 		return p.CoverURL
 	}
@@ -737,6 +746,14 @@ func Lyrics(id int64) (lrc, translation, yrc string, err error) {
 	// use the translation paired with them when both are available.
 	if yrc != "" && words.Ytlrc.Lyric != "" {
 		translation = words.Ytlrc.Lyric
+	}
+	if placeholderLyrics(lrc) && yrc == "" {
+		// None in the catalog: a song of the listener's cloud drive may
+		// have its own there (cloud_lyrics.go).
+		lrc, translation = "", ""
+		if clrc, cyrc, err := cloudLyricsOf(id); err == nil {
+			lrc, yrc = clrc, cyrc
+		}
 	}
 	return lrc, translation, yrc, nil
 }

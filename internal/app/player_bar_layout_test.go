@@ -216,20 +216,39 @@ func TestPlayerBarResponsiveFrames(t *testing.T) {
 	}
 }
 
-// The heart, the comments and adding to a playlist stand at even steps,
-// counts or not (a viewer, 1.3.2-test.1).
+// The heart and the comments stand in slots of one width, counts or not
+// (a viewer, 1.3.2-test.1). The queue belongs just after Add to Playlist
+// and before Volume, even as the wide bar becomes compact.
 func TestPlayerBarEvenSteps(t *testing.T) {
 	for _, width := range []int{1180, 1440} {
 		a := playerBarLayoutApp()
 		tt := playerBarTester(a, width)
-		heart, comments, add := barElement(t, tt, "喜欢"), barElement(t, tt, "评论"), barElement(t, tt, "添加到歌单")
-		mid := func(r ui.Rect) float32 { return r.X + r.W/2 }
-		one, two := mid(comments)-mid(heart), mid(add)-mid(comments)
-		if d := one - two; d > 0.5 || d < -0.5 {
-			t.Fatalf("%d: steps %.1f and %.1f (heart=%+v comments=%+v add=%+v)", width, one, two, heart, comments, add)
+		heart, comments := barElement(t, tt, "喜欢"), barElement(t, tt, "评论")
+		add, queue, volume := barElement(t, tt, "添加到歌单"), barElement(t, tt, "播放列表"), barElement(t, tt, "音量")
+		if d := comments.X - heart.X - countSlot(16, true) - 4; d > 0.5 || d < -0.5 {
+			t.Fatalf("%d: heart=%+v comments=%+v not one slot apart", width, heart, comments)
+		}
+		if gap := queue.X - (add.X + add.W); gap < 0 || gap > 5 || queue.X+queue.W > volume.X {
+			t.Fatalf("%d: want add, queue, volume adjacent, got %+v %+v %+v", width, add, queue, volume)
+		}
+		for _, name := range []string{"桌面歌词", "歌词翻译", "添加到歌单", "播放列表", "音量", "歌曲详情"} {
+			if r := barElement(t, tt, name); r.W < 33 {
+				t.Fatalf("%d: %q still has its old size: %+v", width, name, r)
+			}
+		}
+		for name, minW := range map[string]float32{a.pl.Mode().Name(): 28, "上一首": 33, "播放/暂停": 41, "下一首": 33} {
+			if r := barElement(t, tt, name); r.W < minW {
+				t.Fatalf("%d: %q still has its old size: %+v", width, name, r)
+			}
 		}
 		if !tt.HasText("999+") {
 			t.Fatalf("%d: roomy bar lost its comment count", width)
 		}
+	}
+	a := playerBarLayoutApp()
+	tt := playerBarTester(a, 880)
+	trans, queue, volume := barElement(t, tt, "歌词翻译"), barElement(t, tt, "播放列表"), barElement(t, tt, "音量")
+	if queue.X < trans.X+trans.W || queue.X+queue.W > volume.X {
+		t.Fatalf("compact queue is no longer with the tools: %+v %+v %+v", trans, queue, volume)
 	}
 }

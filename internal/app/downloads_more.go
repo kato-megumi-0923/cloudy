@@ -89,11 +89,60 @@ func matchDownload(tr netease.Track) (netease.Track, bool) {
 	return netease.Track{}, false
 }
 
-// fixDownloads, once a launch, writes the tags of the songs downloaded
-// before Cloudy wrote them, and finds again on NetEase those the folder
-// holds without saying which song they are: they get their cover, their
-// lyrics and their menu back. It works one song at a time, off the main
-// thread, and keeps the index as it goes.
+// matchedFile is the listener's file as the NetEase song m it was found to
+// be: m's ID, for its lyrics, comments and menu, with what the file says of
+// itself kept, its cover first.
+func matchedFile(file, m netease.Track) netease.Track {
+	out := m
+	out.LocalPath = ""
+	if file.Name != "" {
+		out.Name = file.Name
+	}
+	if len(file.Artists) > 0 && file.Artists[0].Name != "" && file.Artists[0].Name != "未知歌手" {
+		out.Artists = file.Artists
+	}
+	if file.Album.Name != "" && file.Album.Name != "未知专辑" {
+		out.Album.Name = file.Album.Name
+	}
+	if file.Album.PicURL != "" {
+		out.Album.PicURL = file.Album.PicURL
+	}
+	if file.No > 0 {
+		out.No, out.Cd = file.No, file.Cd
+	}
+	if file.Duration > 0 {
+		out.Duration = file.Duration
+	}
+	return out
+}
+
+// fixDownload is item with its tags written, if Cloudy downloaded it, or
+// its NetEase song found, if the listener put it there; false when neither
+// changed anything.
+func fixDownload(it download.Item) (download.Item, bool) {
+	switch {
+	case it.Track.ID > 0 && it.Level != "":
+		// Downloaded by Cloudy: its file is Cloudy's to tag.
+		it.Tagged = tagDownload(it)
+		return it, true
+	case it.Track.ID > 0:
+		return it, false
+	}
+	m, ok := matchDownload(it.Track)
+	if !ok {
+		return it, false
+	}
+	it.Track, it.Matched = matchedFile(it.Track, m), true
+	return it, true
+}
+
+// fixDownloads, once a launch, writes the tags of the songs Cloudy
+// downloaded before it wrote them, and finds again on NetEase those the
+// folder holds without saying which song they are: they get their lyrics
+// and their menu back. A file the listener put there is never written to:
+// its tags and its cover are theirs (a viewer's own covers were replaced
+// by NetEase's, 1.3.2); only the index learns its song. It works one song
+// at a time, off the main thread, and keeps the index as it goes.
 func (a *app) fixDownloads() {
 	if a.dl.fixed {
 		return
@@ -101,7 +150,7 @@ func (a *app) fixDownloads() {
 	a.dl.fixed = true
 	var todo []download.Item
 	for _, it := range a.dl.items {
-		if !it.Tagged {
+		if !it.Tagged && !it.Matched {
 			todo = append(todo, it)
 		}
 	}
@@ -110,20 +159,15 @@ func (a *app) fixDownloads() {
 	}
 	go func() {
 		for _, it := range todo {
-			known := it.Track.ID > 0
-			if !known {
-				m, ok := matchDownload(it.Track)
-				if !ok {
-					continue
-				}
-				m.LocalPath = ""
-				it.Track, known = m, true
+			it, ok := fixDownload(it)
+			if !ok {
+				continue
 			}
-			tagged := tagDownload(it)
 			a.post(func() {
 				for i := range a.dl.items {
 					if downloadPathKey(a.dl.items[i].Path) == downloadPathKey(it.Path) {
-						a.dl.items[i].Track, a.dl.items[i].Tagged = it.Track, tagged
+						d := &a.dl.items[i]
+						d.Track, d.Tagged, d.Matched = it.Track, it.Tagged, it.Matched
 					}
 				}
 				a.dl.rev++

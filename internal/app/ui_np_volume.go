@@ -68,6 +68,7 @@ func (a *app) volumeBar(c *ui.Context, key string, width float32, color, track, 
 			FocusRing(false).Label("音量").Cursor(ui.CursorPointer)
 		if s.Changed() {
 			a.pl.SetVolume(a.volume)
+			a.keepVolume()
 			*at = now
 		}
 		pressed := s.Pressed()

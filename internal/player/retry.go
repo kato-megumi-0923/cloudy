@@ -42,7 +42,8 @@ const songRetries = 3
 // unplayable reports whether err means this song cannot be played, so the
 // player goes on to the next, rather than an outage stopping it.
 func unplayable(err error) bool {
-	if errors.Is(err, netease.ErrUnavailable) {
+	var format *UnsupportedError
+	if errors.Is(err, netease.ErrUnavailable) || errors.As(err, &format) {
 		return true
 	}
 	var api *netease.StreamError
@@ -50,7 +51,8 @@ func unplayable(err error) bool {
 }
 
 func retryWait(err error, retries int) (time.Duration, bool) {
-	if errors.Is(err, context.Canceled) || errors.Is(err, netease.ErrUnavailable) {
+	var format *UnsupportedError
+	if errors.Is(err, context.Canceled) || errors.Is(err, netease.ErrUnavailable) || errors.As(err, &format) {
 		return 0, false
 	}
 	var network net.Error
