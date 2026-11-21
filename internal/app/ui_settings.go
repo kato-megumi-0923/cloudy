@@ -1021,7 +1021,7 @@ func (a *app) settingsSystemPage(k *settingsKit) {
 func (a *app) settingsAboutPage(k *settingsKit) {
 	s := &a.settings
 	k.group("软件信息", func() {
-		k.block("软件信息 版本 源码 原项目 开源 "+mygo.App.Version(), func() { a.aboutCard(k) })
+		k.block("软件信息 版本 源码 开源 "+mygo.App.Version(), func() { a.aboutCard(k) })
 	})
 	if a.updates {
 		k.group("更新", func() {

@@ -13,12 +13,8 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// Where the app's source is, as the AGPL asks of a modified version, and what
-// it was made from.
-const (
-	appSource = "https://github.com/nya-owo/cloudy"
-	appOrigin = "https://github.com/egoist/mygo-cloudmusic"
-)
+// Where the app's source is, as the AGPL asks of it.
+const appSource = "https://github.com/nya-owo/cloudy"
 
 //go:embed brand/mascot.png
 var mascotPNG []byte
@@ -55,14 +51,11 @@ func (a *app) aboutCard(k *settingsKit) {
 		ui.Image(c, brandIcon()).Size(52, 52).Fit(ui.Cover).Shrink(0)
 		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(3).Children(func() {
 			ui.Text(c, mygo.App.Name()+" "+mygo.App.Version()).FontSize(14).FontWeight(700)
-			ui.Text(c, "由 nya 制作，基于 egoist/mygo-cloudmusic 修改，以 AGPL-3.0 开源。与网易云音乐官方无关").
+			ui.Text(c, "由 nya 制作，以 AGPL-3.0 开源。与网易云音乐官方无关").
 				FontSize(12).TextColor(ink.muted).LineHeight(1.4)
 		})
 		if k.button("source", "源码", iconExternal, false, false).Clicked() {
 			openLink(appSource)
-		}
-		if k.button("origin", "原项目", iconExternal, false, false).Clicked() {
-			openLink(appOrigin)
 		}
 	})
 }
