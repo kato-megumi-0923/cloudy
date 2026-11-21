@@ -277,6 +277,7 @@ type app struct {
 	queueAdding   bool       // the queue's drawer of playlists to add it to is open
 	radar         radarState // NetEase's radars on the home page
 	lyricDownload lyricDownloadState
+	lyricsFolder  lyricsFolderState
 	progressAt    progressShown // what the taskbar button last showed of the song
 }
 

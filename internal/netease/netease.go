@@ -27,6 +27,14 @@ const UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/6
 
 var httpClient = &http.Client{Timeout: 20 * time.Second}
 
+// anonClient is a client that carries nobody's session: for the requests
+// NetEase refuses from an account that made too many of them at once.
+var anonClient = &http.Client{Timeout: 20 * time.Second}
+
+// ErrTooFrequent is what NetEase answers an account that asked for too
+// much too fast ("操作频繁"): the same request from nobody is let through.
+var ErrTooFrequent = errors.New("netease: too frequent")
+
 type Artist struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
@@ -186,6 +194,19 @@ func get(path string, query url.Values, out any) error {
 	return getContext(context.Background(), path, query, out)
 }
 
+// getWith is get through c, whose session may differ.
+func getWith(c *http.Client, path string, query url.Values, out any) error {
+	u := apiBase + path
+	if len(query) > 0 {
+		u += "?" + query.Encode()
+	}
+	req, err := http.NewRequestWithContext(context.Background(), "GET", u, nil)
+	if err != nil {
+		return err
+	}
+	return doWith(c, req, out)
+}
+
 func getContext(ctx context.Context, path string, query url.Values, out any) error {
 	u := apiBase + path
 	if len(query) > 0 {
@@ -208,9 +229,13 @@ func post(path string, form url.Values, out any) error {
 }
 
 func do(req *http.Request, out any) error {
+	return doWith(httpClient, req, out)
+}
+
+func doWith(c *http.Client, req *http.Request, out any) error {
 	req.Header.Set("User-Agent", UserAgent)
 	req.Header.Set("Referer", apiBase+"/")
-	res, err := httpClient.Do(req)
+	res, err := c.Do(req)
 	if err != nil {
 		return err
 	}
@@ -227,6 +252,9 @@ func do(req *http.Request, out any) error {
 		msg := status.Message
 		if msg == "" {
 			msg = status.Msg
+		}
+		if status.Code == 405 {
+			return fmt.Errorf("%w: %s: %s", ErrTooFrequent, req.URL.Path, msg)
 		}
 		return fmt.Errorf("netease: %s: code %d %s", req.URL.Path, status.Code, msg)
 	}

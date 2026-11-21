@@ -1,6 +1,7 @@
 package netease
 
 import (
+	"net/http"
 	"net/url"
 	"strconv"
 )
@@ -36,27 +37,10 @@ func (r *SearchResult) Len() int {
 
 // SearchPage returns limit of what matches a query, of a type, from offset.
 func SearchPage(query string, kind SearchType, limit, offset int) (SearchResult, error) {
-	var res struct {
-		Result struct {
-			Songs         []Track         `json:"songs"`
-			SongCount     int             `json:"songCount"`
-			Albums        []AlbumProfile  `json:"albums"`
-			AlbumCount    int             `json:"albumCount"`
-			Artists       []ArtistProfile `json:"artists"`
-			ArtistCount   int             `json:"artistCount"`
-			Playlists     []Playlist      `json:"playlists"`
-			PlaylistCount int             `json:"playlistCount"`
-			Users         []User          `json:"userprofiles"`
-			UserCount     int             `json:"userprofileCount"`
-			Podcasts      []Podcast       `json:"djRadios"`
-			PodcastCount  int             `json:"djRadiosCount"`
-		} `json:"result"`
-	}
-	q := url.Values{"s": {query}, "type": {strconv.Itoa(int(kind))}, "limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}, "total": {"true"}}
-	if err := get("/api/cloudsearch/pc", q, &res); err != nil {
+	r, err := searchPage(httpClient, query, kind, limit, offset)
+	if err != nil {
 		return SearchResult{}, err
 	}
-	r := res.Result
 	// Search marks whole catalogues as taken down that the listener may
 	// play, as YOASOBI's for a subscriber: the songs' details say right.
 	detailPrivileges(r.Songs)
@@ -66,10 +50,49 @@ func SearchPage(query string, kind SearchType, limit, offset int) (SearchResult,
 	}, nil
 }
 
+// searchPage is SearchPage over c, whose session differs.
+func searchPage(c *http.Client, query string, kind SearchType, limit, offset int) (searchResult, error) {
+	var res struct {
+		Result searchResult `json:"result"`
+	}
+	q := url.Values{"s": {query}, "type": {strconv.Itoa(int(kind))}, "limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}, "total": {"true"}}
+	if err := getWith(c, "/api/cloudsearch/pc", q, &res); err != nil {
+		return searchResult{}, err
+	}
+	return res.Result, nil
+}
+
+// A searchResult is what a search page holds, of every kind.
+type searchResult struct {
+	Songs         []Track         `json:"songs"`
+	SongCount     int             `json:"songCount"`
+	Albums        []AlbumProfile  `json:"albums"`
+	AlbumCount    int             `json:"albumCount"`
+	Artists       []ArtistProfile `json:"artists"`
+	ArtistCount   int             `json:"artistCount"`
+	Playlists     []Playlist      `json:"playlists"`
+	PlaylistCount int             `json:"playlistCount"`
+	Users         []User          `json:"userprofiles"`
+	UserCount     int             `json:"userprofileCount"`
+	Podcasts      []Podcast       `json:"djRadios"`
+	PodcastCount  int             `json:"djRadiosCount"`
+}
+
 // Search returns the songs matching a query.
 func Search(query string, limit int) ([]Track, error) {
 	res, err := SearchPage(query, SearchSongs, limit, 0)
 	return res.Songs, err
+}
+
+// SearchAnonymous is Search without the listener's session. NetEase refuses
+// a burst of searches made by an account ("操作频繁") where it lets an
+// anonymous one through, so a batch of them is made without one.
+func SearchAnonymous(query string, limit int) ([]Track, error) {
+	res, err := searchPage(anonClient, query, SearchSongs, limit, 0)
+	if err != nil {
+		return nil, err
+	}
+	return res.Songs, nil
 }
 
 // AlbumProfile is an album as its page shows it.

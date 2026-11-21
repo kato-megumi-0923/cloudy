@@ -57,6 +57,9 @@ func (a *app) localEmpty(c *ui.Context, title, body string) {
 			if pillButton(c.Key("add"), iconPlus, "添加文件夹", p.accent, p.onAccent).Clicked() {
 				a.pickLibraryFolder()
 			}
+			if pillButton(c.Key("lyrics"), iconLyrics, "下载歌词", p.hover.Over(p.bg), p.text).Clicked() {
+				a.openLyricsFolder()
+			}
 			if len(a.settings.LocalFolders) > 0 {
 				a.localFoldersButton(c)
 				if pillButton(c.Key("rescan"), iconReload, "重新扫描", p.hover.Over(p.bg), p.text).Clicked() {
@@ -114,6 +117,9 @@ func (a *app) localHeader(c *ui.Context) {
 					a.pickLibraryFolder()
 				}
 				a.localFoldersButton(c)
+				if pillButton(c.Key("lyrics"), iconLyrics, "下载歌词", p.hover.Over(p.bg), p.text).Clicked() {
+					a.openLyricsFolder()
+				}
 				if iconButton(c.Key("rescan"), iconReload, 16, p.muted, "重新扫描").Size(36, 36).Clicked() {
 					a.scanLibraryLater()
 					a.toast = "正在重新读取本地音乐"
