@@ -2,7 +2,7 @@
 
 <img src="resources/icon.png" width="120" alt="Cloudy 图标">
 
-nya 维护的第三方网易云音乐 Windows 客户端（原名 Cloud-nya），基于 [egoist/mygo-cloudmusic](https://github.com/egoist/mygo-cloudmusic) 修改。用 Go 和 [MyGo](https://github.com/egoist/mygo) 编写，原生界面，不用 WebView，占用小、启动快。
+nya 维护的 Windows 音乐客户端（原名 Cloud-nya），登录网易云音乐账号后使用其曲库。用 Go 和 [MyGo](https://github.com/egoist/mygo) 编写，原生界面，不用 WebView，占用小、启动快。
 
 ## 特色功能
 
@@ -90,7 +90,7 @@ Cloudy 由 **nya-owo** 开发并维护，同时借助 AI 工具协助完成开�
 - [folia-major](https://github.com/chthollyphile/folia-major)：歌词动画效果的参考
 - [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)、[Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR) 与 [Silero VAD](https://github.com/snakers4/silero-vad)：本机语音识别
 
-本项目与网易云音乐官方无关，音乐版权归各权利人所有。
+本项目与网易云音乐官方无关，音乐版权归各权利人所有。仓库只放源码，不提供安装包；仅供个人学习研究，请支持正版。
 
 ## 许可证
 
